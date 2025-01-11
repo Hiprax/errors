@@ -1,0 +1,44 @@
+{
+  "name": "@hiprax/errors",
+  "version": "0.0.1",
+  "description": "A modular error handling solution for Express.js applications.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hiprax/errors.git"
+  },
+  "keywords": [
+    "error",
+    "middleware",
+    "express",
+    "typescript"
+  ],
+  "author": "Hiprax",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Hiprax/errors/issues"
+  },
+  "homepage": "https://github.com/Hiprax/errors#readme",
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=8.x"
+  },
+  "dependencies": {
+    "express": ">=4.x"
+  },
+  "peerDependencies": {
+    "express": ">=4.x"
+  }
+}
