@@ -20,16 +20,23 @@ npm install @hiprax/errors
 ## Usage
 
 ```ts
-import {
-  handler as ErrorHandler,
-  middleware as errorMiddleware,
-} from "@hiprax/errors";
+import express from "express";
+import http from "http";
+import { errorMiddleware, ErrorHandler } from "@hiprax/errors";
 
-app.use(errorMiddleware);
+const app = express();
+const server = http.createServer(app);
+
+server.listen(3000, () => {
+  console.log("Server is running on port 3000");
+});
 
 app.use((req, res, next) => {
+  console.log("Request received");
   return next(new ErrorHandler("Something went wrong!", 500));
 });
+
+app.use(errorMiddleware);
 ```
 
 ## License

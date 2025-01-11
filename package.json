@@ -1,6 +1,6 @@
 {
   "name": "@hiprax/errors",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A modular error handling solution for Express.js applications.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
