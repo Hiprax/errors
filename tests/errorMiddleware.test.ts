@@ -1,6 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import errorMiddleware from "./errorMiddleware";
-import ErrorHandler from "./ErrorHandler";
+import { errorMiddleware, ErrorHandler } from "../src";
 
 function createRes() {
   const res: Partial<Response> & { body?: any; code?: number; sent?: boolean } =
@@ -41,6 +40,24 @@ describe("errorMiddleware", () => {
     errorMiddleware(err, req, res, next);
     expect((res as any).code).toBe(400);
     expect((res as any).body.message).toContain("email");
+  });
+
+  it("handles CSRF token error to 403", () => {
+    const res = createRes();
+    const err = { code: "EBADCSRFTOKEN" } as any;
+    errorMiddleware(err, req, res, next);
+    expect((res as any).code).toBe(403);
+    expect((res as any).body.message).toContain("CSRF");
+  });
+
+  it("normalizes network errors to 502", () => {
+    for (const code of ["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT"]) {
+      const res = createRes();
+      const err = { code } as any;
+      errorMiddleware(err, req, res, next);
+      expect((res as any).code).toBe(502);
+      expect((res as any).body.message).toContain("network");
+    }
   });
 
   it("ends if headers already sent", () => {

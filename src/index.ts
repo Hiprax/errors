@@ -9,4 +9,5 @@ export { default as ErrorHandler } from "./ErrorHandler";
 export { default as errorMiddleware } from "./errorMiddleware";
 export { default as errorCodes } from "./errorCodes";
 export { catchAsync } from "./catchAsync";
-export * from "./httpErrors";
+export { handleCommonErrors } from "./handleCommonErrors";
+export { httpErrors } from "./httpErrors";

@@ -106,26 +106,15 @@ class UserController {
 }
 ```
 
-### HTTP error factories
+### HTTP error factories (namespaced)
 
 Convenience helpers that return `ErrorHandler` instances with sensible defaults:
 
 ```ts
-import {
-  badRequest,
-  unauthorized,
-  forbidden,
-  notFound,
-  conflict,
-  tooManyRequests,
-  internalServerError,
-  badGateway,
-  serviceUnavailable,
-  gatewayTimeout,
-} from "@hiprax/errors";
+import { httpErrors } from "@hiprax/errors";
 
-throw notFound();
-throw forbidden("Only admins can do that");
+throw httpErrors.notFound();
+throw httpErrors.forbidden("Only admins can do that");
 ```
 
 ---

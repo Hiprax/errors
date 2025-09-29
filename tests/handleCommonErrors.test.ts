@@ -1,4 +1,4 @@
-import { handleCommonErrors } from "./handleCommonErrors";
+import { handleCommonErrors } from "../src";
 
 describe("handleCommonErrors", () => {
   it("maps CastError to 400 with path", () => {

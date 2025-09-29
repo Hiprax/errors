@@ -4,4 +4,8 @@
 .env
 .DS_Store
 
-.npmignore
+coverage
+.vscode/
+.idea/
+.turbo
+*.log

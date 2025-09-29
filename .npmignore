@@ -1,0 +1,14 @@
+# Exclude sources and configs from the published package
+src/
+tests/
+jest.config.js
+tsconfig.json
+tsup.config.ts
+*.log
+.DS_Store
+.vscode/
+.idea/
+coverage/
+node_modules/
+.env*
+

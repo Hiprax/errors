@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { catchAsync } from "./catchAsync";
+import { catchAsync } from "../src";
 
 describe("catchAsync", () => {
   let mockReq: Partial<Request>;
@@ -66,13 +66,13 @@ describe("catchAsync", () => {
     });
 
     it("should preserve function properties", () => {
-      const testFn = function testHandler() {};
+      const testFn = function testHandler() {} as any;
       Object.defineProperty(testFn, "name", { value: "testHandler" });
       testFn.customProp = "test";
 
       const wrapped = catchAsync(testFn);
       expect(wrapped.name).toBe("testHandler");
-      expect(wrapped.customProp).toBe("test");
+      expect((wrapped as any).customProp).toBe("test");
     });
   });
 
@@ -196,7 +196,7 @@ describe("catchAsync", () => {
       );
 
       await handler(mockReq as Request, mockRes as Response, mockNext);
-      const passedError = mockNext.mock.calls[0][0];
+      const passedError = mockNext.mock.calls[0][0] as any as CustomError;
       expect(passedError).toBeInstanceOf(CustomError);
       expect(passedError.code).toBe(500);
     });
@@ -232,7 +232,7 @@ describe("catchAsync", () => {
       );
 
       await handler(mockReq as Request, mockRes as Response, mockNext);
-      const passedError = mockNext.mock.calls[0][0];
+      const passedError = mockNext.mock.calls[0][0] as any;
       expect(passedError.hiddenProp).toBe("hidden");
     });
 
@@ -253,7 +253,7 @@ describe("catchAsync", () => {
       );
 
       await handler(mockReq as Request, mockRes as Response, mockNext);
-      const passedError = mockNext.mock.calls[0][0];
+      const passedError = mockNext.mock.calls[0][0] as any;
       expect(passedError.dynamicProp).toBe("private");
     });
 
@@ -262,7 +262,7 @@ describe("catchAsync", () => {
         [key: symbol]: string;
       };
       const sym = Symbol("test");
-      error[sym] = "symbol value";
+      (error as any)[sym] = "symbol value";
 
       const handler = catchAsync(
         async (req: Request, res: Response, next: NextFunction) => {
@@ -274,7 +274,7 @@ describe("catchAsync", () => {
       const passedError = mockNext.mock.calls[0][0] as Error & {
         [key: symbol]: string;
       };
-      expect(passedError[sym]).toBe("symbol value");
+      expect((passedError as any)[sym]).toBe("symbol value");
     });
 
     it("should handle errors with prototype chain properties", async () => {
@@ -292,7 +292,7 @@ describe("catchAsync", () => {
       );
 
       await handler(mockReq as Request, mockRes as Response, mockNext);
-      const passedError = mockNext.mock.calls[0][0];
+      const passedError = mockNext.mock.calls[0][0] as any;
       expect(passedError).toBeInstanceOf(DerivedError);
       expect(passedError.baseProp).toBe("base");
       expect(passedError.derivedProp).toBe("derived");
@@ -333,18 +333,18 @@ describe("catchAsync", () => {
           if (prop === "message") {
             return "Proxied message";
           }
-          return target[prop as keyof Error];
+          return (target as any)[prop as keyof Error];
         },
       });
 
       const handler = catchAsync(
         async (req: Request, res: Response, next: NextFunction) => {
-          throw proxy;
+          throw proxy as any;
         }
       );
 
       await handler(mockReq as Request, mockRes as Response, mockNext);
-      const passedError = mockNext.mock.calls[0][0];
+      const passedError = mockNext.mock.calls[0][0] as any;
       expect(passedError.message).toBe("Proxied message");
     });
 
@@ -360,8 +360,8 @@ describe("catchAsync", () => {
       );
 
       await handler(mockReq as Request, mockRes as Response, mockNext);
-      const passedError = mockNext.mock.calls[0][0];
-      expect(passedError.stack).toContain("throwError");
+      const passedError = mockNext.mock.calls[0][0] as Error;
+      expect(String(passedError.stack)).toContain("throwError");
     });
 
     it("should handle errors with multiple async operations", async () => {
@@ -426,12 +426,12 @@ describe("catchAsync", () => {
           yield await Promise.resolve(1);
           throw new Error("Iterator error");
         },
-      };
+      } as any;
 
       const handler = catchAsync(
         async (req: Request, res: Response, next: NextFunction) => {
-          for await (const item of asyncIterable) {
-            // Just iterate
+          for await (const _item of asyncIterable) {
+            // iterate
           }
         }
       );

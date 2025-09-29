@@ -1,4 +1,4 @@
-import errorCodes from "./errorCodes";
+import { errorCodes } from "../src";
 
 describe("errorCodes map", () => {
   it("is a Map with common HTTP codes", () => {

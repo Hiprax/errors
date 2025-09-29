@@ -1,5 +1,4 @@
-import ErrorHandler from "./ErrorHandler";
-import errorCodes from "./errorCodes";
+import { ErrorHandler, errorCodes } from "../src";
 
 describe("ErrorHandler", () => {
   it("creates a default 500 error when no args provided", () => {
