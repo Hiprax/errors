@@ -23,9 +23,11 @@ const errorMiddleware = (
   res: Response,
   _next: NextFunction
 ): void => {
+  // Normalize to our ErrorHandler using common mappers
   let error = handleCommonErrors(err);
 
-  switch (err.code) {
+  // Map various known Node/Mongo/Network codes to friendlier messages
+  switch (err?.code) {
     case "ENOENT":
       error = new ErrorHandler("Resource not found", 404);
       break;
@@ -41,24 +43,35 @@ const errorMiddleware = (
       error = new ErrorHandler("Invalid CSRF token", 403);
       break;
     case "ECONNREFUSED":
-      error = new ErrorHandler("Connection refused", 502);
-      break;
     case "ECONNRESET":
-      error = new ErrorHandler("Connection reset by peer", 502);
-      break;
     case "ETIMEDOUT":
-      error = new ErrorHandler("Connection timed out", 502);
+      error = new ErrorHandler("Upstream network error", 502);
       break;
     default:
       break;
   }
 
-  res.status(error.statusCode).json({
+  if (res.headersSent) {
+    // Avoid writing after headers were sent; just end the response
+    try {
+      res.end();
+    } catch {}
+    return;
+  }
+
+  const isProd = process.env.NODE_ENV === "production";
+  const payload: Record<string, any> = {
     success: false,
     message: error.message,
     statusCode: error.statusCode,
     statusText: error.statusText,
-  });
+  };
+
+  if (!isProd && err?.stack) {
+    payload.stack = String(err.stack);
+  }
+
+  res.status(error.statusCode).json(payload);
 };
 
 export default errorMiddleware;

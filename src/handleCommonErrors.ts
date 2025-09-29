@@ -32,10 +32,18 @@ export const handleCommonErrors = (err: any): ErrorHandler => {
         "Error communicating with an external service",
         502
       );
+    case "SyntaxError":
+      return new ErrorHandler("Malformed JSON or invalid syntax", 400);
+    case "ZodError": {
+      const message = (err.issues || []).map((i: any) => i.message).join(", ");
+      return new ErrorHandler(message || "Validation error", 400);
+    }
     default:
       return new ErrorHandler(
-        err.message || "Unhandled server error",
-        err.statusCode || 500
+        typeof err.message === "string" && err.message.length
+          ? err.message
+          : "Unhandled server error",
+        typeof err.statusCode === "number" ? err.statusCode : 500
       );
   }
 };

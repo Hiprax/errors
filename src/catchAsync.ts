@@ -31,11 +31,6 @@ function isFunction(fn: unknown): fn is Function {
 }
 
 /**
- * Tracks if next() has been called to prevent multiple calls.
- */
-const nextCalled = new WeakMap<Function, boolean>();
-
-/**
  * Wraps an Express middleware function (sync or async) so that any thrown errors
  * or rejected promises are automatically passed to the next() function.
  * Preserves function arity and name for Express routing compatibility.
@@ -48,104 +43,91 @@ const nextCalled = new WeakMap<Function, boolean>();
  */
 function wrapHandler<Fn extends AnyRequestHandler>(fn: Fn): Fn {
   if (!isFunction(fn)) {
-    console.error("wrapHandler received non-function:", fn);
     return fn;
   }
 
-  const expectedArgCount = fn.length;
-  let hasCalledNext = false;
-
-  // Create a new function with the same name as the original
-  const originalName = fn.name || "handler";
-  const wrapped = function wrappedHandler(
-    this: unknown,
-    ...args: unknown[]
-  ): unknown {
-    // Reset nextCalled state for this function call
-    hasCalledNext = false;
-
-    if (args.length < expectedArgCount) {
-      console.error(
-        `Warning: Wrapped handler called with insufficient arguments. Expected ${expectedArgCount}, got ${
-          args.length
-        }. Handler: ${fn.name ?? "anonymous"}`
-      );
-    }
-
-    const next = args[args.length - 1] as NextFunction;
-
-    if (!isFunction(next)) {
-      console.error(
-        `Error: Wrapped handler's last argument is not a function (expected next). Handler: ${
-          fn.name ?? "anonymous"
-        }. Last arg type: ${typeof args[args.length - 1]}`
-      );
-      return;
-    }
-
-    // Wrap next to prevent multiple calls
-    const wrappedNext = (...nextArgs: any[]) => {
-      if (hasCalledNext) {
-        console.warn(
-          `Warning: next() called multiple times in handler: ${
-            fn.name ?? "anonymous"
-          }`
-        );
-        return;
+  const createInvoker = () => {
+    return function invoke(this: unknown, ...args: unknown[]) {
+      let hasCalledNext = false;
+      const maybeNext = args[args.length - 1];
+      if (!isFunction(maybeNext)) {
+        // If there is no valid next function (e.g., method invoked directly),
+        // do nothing to avoid throwing and to prevent accidental recursion.
+        return undefined;
       }
-      hasCalledNext = true;
-      return next(...nextArgs);
+      const next = maybeNext as NextFunction;
+
+      const wrappedNext = (...nextArgs: any[]) => {
+        if (hasCalledNext) {
+          return;
+        }
+        hasCalledNext = true;
+        return next(...nextArgs);
+      };
+
+      // Replace the original next with our wrapped version
+      args[args.length - 1] = wrappedNext;
+
+      try {
+        const result = (fn as Function).apply(this, args);
+        if (result && typeof (result as any).then === "function") {
+          return (result as Promise<any>).catch((err) => {
+            if (!hasCalledNext) {
+              const errorToPass =
+                err instanceof Error
+                  ? err
+                  : new Error(`Non-Error thrown/rejected: ${String(err)}`);
+              wrappedNext(errorToPass);
+            }
+            return undefined;
+          });
+        }
+        return result;
+      } catch (err) {
+        if (!hasCalledNext) {
+          const errorToPass =
+            err instanceof Error
+              ? err
+              : new Error(`Non-Error thrown synchronously: ${String(err)}`);
+          wrappedNext(errorToPass);
+        }
+        return undefined;
+      }
     };
+  };
 
-    // Replace the original next with our wrapped version
-    args[args.length - 1] = wrappedNext;
+  const invoker = createInvoker();
 
-    try {
-      const result = (fn as Function).apply(this, args);
+  // Preserve Express arity by creating wrappers with 3 or 4 parameters
+  let wrapped: Function;
+  if (fn.length >= 4) {
+    wrapped = function (
+      this: unknown,
+      err: any,
+      req: Request,
+      res: Response,
+      next: NextFunction
+    ) {
+      return (invoker as any).call(this, err, req, res, next);
+    };
+  } else {
+    wrapped = function (
+      this: unknown,
+      req: Request,
+      res: Response,
+      next: NextFunction
+    ) {
+      return (invoker as any).call(this, req, res, next);
+    };
+  }
 
-      if (result instanceof Promise) {
-        return result.catch((err) => {
-          if (!hasCalledNext) {
-            const errorToPass =
-              err instanceof Error
-                ? err
-                : new Error(`Non-Error thrown/rejected: ${String(err)}`);
-            wrappedNext(errorToPass);
-          }
-          // Return undefined to prevent further execution
-          return undefined;
-        });
-      }
-
-      return result;
-    } catch (err) {
-      if (!hasCalledNext) {
-        const errorToPass =
-          err instanceof Error
-            ? err
-            : new Error(`Non-Error thrown synchronously: ${String(err)}`);
-        wrappedNext(errorToPass);
-      }
-      // Return undefined to prevent further execution
-      return undefined;
-    }
-  } as unknown as Fn;
-
-  // Set the name property with proper prefix
-  Object.defineProperty(wrapped, "name", {
-    value: `wrapped_${originalName}`,
-    configurable: true,
-    writable: true,
-    enumerable: false,
-  });
-
-  // Set the length property
-  Object.defineProperty(wrapped, "length", {
-    value: fn.length,
-    configurable: true,
-    writable: false,
-    enumerable: false,
-  });
+  // Preserve function name from the original
+  try {
+    Object.defineProperty(wrapped, "name", {
+      value: fn.name || "handler",
+      configurable: true,
+    });
+  } catch {}
 
   // Copy any other properties from the original function
   const originalProps = Object.getOwnPropertyNames(fn);
@@ -153,16 +135,17 @@ function wrapHandler<Fn extends AnyRequestHandler>(fn: Fn): Fn {
     if (prop !== "length" && prop !== "name") {
       const descriptor = Object.getOwnPropertyDescriptor(fn, prop);
       if (descriptor) {
-        Object.defineProperty(wrapped, prop, {
-          ...descriptor,
-          configurable: true,
-          writable: true,
-        });
+        try {
+          Object.defineProperty(wrapped, prop, {
+            ...descriptor,
+            configurable: true,
+          });
+        } catch {}
       }
     }
   }
 
-  return wrapped;
+  return wrapped as Fn;
 }
 
 /**
@@ -177,20 +160,11 @@ function wrapControllerClass<T extends new (...args: any[]) => any>(
 ): T {
   // Check if target is actually a function (a class constructor is a function)
   if (!isFunction(constructor)) {
-    console.error(
-      "wrapControllerClass received non-function target:",
-      constructor
-    );
     return constructor;
   }
 
   // Check if it has a prototype (typical for classes/constructors)
   if (!constructor.prototype) {
-    console.warn(
-      `wrapControllerClass received a function without a prototype, skipping method wrapping. Target: ${
-        constructor.name || "anonymous"
-      }`
-    );
     return constructor;
   }
 
@@ -214,24 +188,15 @@ function wrapControllerClass<T extends new (...args: any[]) => any>(
 
       // Skip properties that don't exist, aren't functions, or are getters/setters
       if (descriptor && isFunction(descriptor.value)) {
-        try {
-          // Wrap the method using the handler wrapper
-          const originalMethod = descriptor.value as AnyRequestHandler;
-          const wrappedMethod = wrapHandler(originalMethod);
+        // Wrap the method using the handler wrapper
+        const originalMethod = descriptor.value as AnyRequestHandler;
+        const wrappedMethod = wrapHandler(originalMethod);
 
-          // Replace the original method on the prototype with the wrapped version
-          Object.defineProperty(prototype, key, {
-            ...descriptor,
-            value: wrappedMethod,
-          });
-        } catch (error) {
-          console.error(
-            `Failed to wrap method "${String(key)}" on class "${
-              constructor.name || "anonymous"
-            }":`,
-            error
-          );
-        }
+        // Replace the original method on the prototype with the wrapped version
+        Object.defineProperty(prototype, key, {
+          ...descriptor,
+          value: wrappedMethod,
+        });
       }
     }
 

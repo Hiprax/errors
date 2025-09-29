@@ -1,10 +1,18 @@
 {
   "name": "@hiprax/errors",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "A modular error handling solution for Express.js applications.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
   "scripts": {
     "build": "tsup",
     "test": "jest"
@@ -28,20 +36,18 @@
     "url": "https://github.com/Hiprax/errors/issues"
   },
   "homepage": "https://github.com/Hiprax/errors#readme",
-  "devDependencies": {
-    "@types/express": "^5.0.0",
-    "@types/jest": "^29.5.12",
-    "@types/mocha": "^10.0.10",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.1.2",
-    "tsup": "^8.3.5",
-    "typescript": "^5.7.3"
-  },
   "engines": {
-    "node": ">=8.x"
+    "node": ">=18.12"
   },
-  "dependencies": {
-    "express": ">=4.x"
+  "dependencies": {},
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.4",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2"
   },
   "peerDependencies": {
     "express": ">=4.x"
