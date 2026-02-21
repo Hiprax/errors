@@ -31,6 +31,22 @@ function isFunction(fn: unknown): fn is Function {
 }
 
 /**
+ * Checks if a function is a class constructor by inspecting its string representation.
+ * This is the reliable ES2022+ way to detect class constructors, since duck-typing
+ * (checking for .prototype) is true for ALL regular (non-arrow) functions.
+ *
+ * @param fn The function to check.
+ * @returns True if the function is a class constructor, false otherwise.
+ */
+function isClassConstructor(fn: Function): boolean {
+  try {
+    return /^class\s/.test(Function.prototype.toString.call(fn));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Wraps an Express middleware function (sync or async) so that any thrown errors
  * or rejected promises are automatically passed to the next() function.
  * Preserves function arity and name for Express routing compatibility.
@@ -130,9 +146,10 @@ function wrapHandler<Fn extends AnyRequestHandler>(fn: Fn): Fn {
   } catch {}
 
   // Copy any other properties from the original function
+  const skipProps = new Set(["length", "name", "prototype", "arguments", "caller"]);
   const originalProps = Object.getOwnPropertyNames(fn);
   for (const prop of originalProps) {
-    if (prop !== "length" && prop !== "name") {
+    if (!skipProps.has(prop)) {
       const descriptor = Object.getOwnPropertyDescriptor(fn, prop);
       if (descriptor) {
         try {
@@ -304,14 +321,10 @@ export function catchAsync(
     return target;
   }
 
-  // Duck typing to determine if 'target' is likely a class constructor.
-  // A class constructor is a function, and typically has a 'prototype' property
-  // which is an object. This is the standard way to detect old-style decorators.
-  if (
-    isFunction(target) &&
-    target.prototype &&
-    typeof target.prototype === "object"
-  ) {
+  // Use string-based detection to reliably distinguish class constructors
+  // from regular functions. Duck-typing (checking .prototype) fails because
+  // all regular (non-arrow) functions also have a prototype object.
+  if (isFunction(target) && isClassConstructor(target)) {
     return wrapControllerClass(target as new (...args: any[]) => any);
   }
 

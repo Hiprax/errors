@@ -65,6 +65,30 @@ describe("catchAsync", () => {
       expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
     });
 
+    it("should wrap regular named functions (not treat as class)", async () => {
+      const handler = catchAsync(
+        function myHandler(req: Request, res: Response, next: NextFunction) {
+          throw new Error("Named function error");
+        }
+      );
+
+      handler(mockReq as Request, mockRes as Response, mockNext);
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockNext.mock.calls[0][0].message).toBe("Named function error");
+    });
+
+    it("should wrap async regular named functions", async () => {
+      const handler = catchAsync(
+        async function myAsyncHandler(req: Request, res: Response, next: NextFunction) {
+          throw new Error("Async named function error");
+        }
+      );
+
+      await handler(mockReq as Request, mockRes as Response, mockNext);
+      expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockNext.mock.calls[0][0].message).toBe("Async named function error");
+    });
+
     it("should preserve function properties", () => {
       const testFn = function testHandler() {} as any;
       Object.defineProperty(testFn, "name", { value: "testHandler" });
@@ -73,6 +97,80 @@ describe("catchAsync", () => {
       const wrapped = catchAsync(testFn);
       expect(wrapped.name).toBe("testHandler");
       expect((wrapped as any).customProp).toBe("test");
+    });
+
+    it("should return result from successful sync handler without calling next with error", () => {
+      const handler = catchAsync(
+        (req: Request, res: Response, next: NextFunction) => {
+          res.json({ ok: true });
+          return "sync-result";
+        }
+      );
+
+      const result = handler(mockReq as Request, mockRes as Response, mockNext);
+      expect(result).toBe("sync-result");
+      expect(mockRes.json).toHaveBeenCalledWith({ ok: true });
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it("should not call next with error when async handler resolves successfully", async () => {
+      const handler = catchAsync(
+        async (req: Request, res: Response, next: NextFunction) => {
+          await Promise.resolve();
+          res.json({ ok: true });
+        }
+      );
+
+      await handler(mockReq as Request, mockRes as Response, mockNext);
+      expect(mockRes.json).toHaveBeenCalledWith({ ok: true });
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it("should wrap sync non-Error throw with descriptive message", () => {
+      const handler = catchAsync(
+        (req: Request, res: Response, next: NextFunction) => {
+          throw "a string value";
+        }
+      );
+
+      handler(mockReq as Request, mockRes as Response, mockNext);
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      const passedError = mockNext.mock.calls[0][0] as Error;
+      expect(passedError).toBeInstanceOf(Error);
+      expect(passedError.message).toContain("Non-Error thrown synchronously");
+      expect(passedError.message).toContain("a string value");
+    });
+
+    it("should return undefined and not throw when called without a next function", () => {
+      const handler = catchAsync(
+        (req: Request, res: Response, next: NextFunction) => {
+          res.json({ ok: true });
+        }
+      );
+
+      // Call with a non-function as the last argument
+      const result = (handler as any)(mockReq, mockRes, "not-a-function");
+      expect(result).toBeUndefined();
+    });
+
+    it("should default function name to 'handler' for anonymous arrow functions", () => {
+      const wrapped = catchAsync(
+        ((_req: Request, _res: Response, _next: NextFunction) => {}) as any
+      );
+      expect(wrapped.name).toBe("handler");
+    });
+
+    it("should only call next once when sync handler calls next explicitly then throws", () => {
+      const handler = catchAsync(
+        (req: Request, res: Response, next: NextFunction) => {
+          next(new Error("Explicit next call"));
+          throw new Error("Subsequent throw");
+        }
+      );
+
+      handler(mockReq as Request, mockRes as Response, mockNext);
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect(mockNext.mock.calls[0][0].message).toBe("Explicit next call");
     });
   });
 
@@ -117,19 +215,40 @@ describe("catchAsync", () => {
       expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
     });
 
-    it("should handle circular dependencies", () => {
+    it("should safely handle wrapped methods called without a next function (e.g. mutual calls)", () => {
       @catchAsync
       class TestController {
         method1() {
-          this.method2();
+          return this.method2();
         }
         method2() {
-          this.method1();
+          return "result";
         }
       }
 
       const controller = new TestController();
-      expect(() => controller.method1()).not.toThrow();
+      // Wrapped methods called without next() as last arg return undefined
+      const result = controller.method1();
+      expect(result).toBeUndefined();
+    });
+
+    it("should skip getter properties on prototype and leave them functional", () => {
+      @catchAsync
+      class TestController {
+        private _value = 42;
+
+        get myGetter() {
+          return this._value;
+        }
+
+        async testMethod(req: Request, res: Response, next: NextFunction) {
+          throw new Error("Test error");
+        }
+      }
+
+      const controller = new TestController();
+      // The getter should still work correctly (not wrapped as a handler)
+      expect(controller.myGetter).toBe(42);
     });
 
     it("should handle bound methods", async () => {
@@ -179,6 +298,19 @@ describe("catchAsync", () => {
       // @ts-expect-error Testing invalid input
       const result2 = catchAsync(undefined);
       expect(result2).toBe(undefined);
+    });
+
+    it("should throw TypeError for non-function non-null input", () => {
+      // @ts-expect-error Testing invalid input
+      expect(() => catchAsync(42)).toThrow(TypeError);
+      // @ts-expect-error Testing invalid input
+      expect(() => catchAsync(42)).toThrow(
+        "Target must be a function or a class constructor"
+      );
+      // @ts-expect-error Testing invalid input
+      expect(() => catchAsync("not a function")).toThrow(TypeError);
+      // @ts-expect-error Testing invalid input
+      expect(() => catchAsync({ key: "value" })).toThrow(TypeError);
     });
 
     it("should handle error objects with custom properties", async () => {

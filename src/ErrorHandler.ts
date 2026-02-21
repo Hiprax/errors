@@ -32,8 +32,13 @@ class ErrorHandler extends Error {
     statusCode = 500
   ) {
     super(message);
+    this.name = "ErrorHandler";
     this.statusCode = errorCodes.has(statusCode) ? statusCode : 500;
     this.statusText = errorCodes.get(this.statusCode);
+
+    if (typeof Error.captureStackTrace === "function") {
+      Error.captureStackTrace(this, this.constructor);
+    }
   }
 }
 

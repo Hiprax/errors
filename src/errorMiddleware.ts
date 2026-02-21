@@ -32,7 +32,8 @@ const errorMiddleware = (
       error = new ErrorHandler("Resource not found", 404);
       break;
     case 11000: {
-      const duplicateField = Object.keys(err.keyValue || {}).join(", ");
+      const duplicateField =
+        Object.keys(err.keyValue || {}).join(", ") || "unknown";
       error = new ErrorHandler(
         `Duplicate entry for field(s): ${duplicateField}`,
         400

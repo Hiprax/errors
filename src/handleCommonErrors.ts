@@ -16,16 +16,16 @@ export const handleCommonErrors = (err: any): ErrorHandler => {
     case "CastError":
       return new ErrorHandler(`Resource not found. Invalid ${err.path}`, 400);
     case "ValidationError": {
-      const message = Object.values(err.errors)
+      const message = Object.values(err.errors || {})
         .map((value: any) => value.message)
         .join(", ");
-      return new ErrorHandler(message, 400);
+      return new ErrorHandler(message || "Validation error", 400);
     }
     case "JsonWebTokenError":
     case "TokenExpiredError":
       return new ErrorHandler(
         "JSON Web Token is invalid or expired. Please try again",
-        400
+        401
       );
     case "AxiosError":
       return new ErrorHandler(

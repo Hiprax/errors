@@ -1,13 +1,16 @@
 # @hiprax/errors
 
-A small, typed, framework-agnostic error toolkit tailored for Express.js apps:
+[![npm version](https://img.shields.io/npm/v/@hiprax/errors)](https://www.npmjs.com/package/@hiprax/errors)
+[![license](https://img.shields.io/npm/l/@hiprax/errors)](./LICENSE)
+
+A small, typed error toolkit for Express.js apps. Zero runtime dependencies.
 
 - **Custom Error class** with `statusCode` and `statusText`
 - **Production-ready error middleware** for Express
-- **Common error mapper** for popular libraries (JWT, Axios, validation, etc.)
-- **Async wrapper/decorator** `catchAsync` for safe handlers and controllers
-- **HTTP error factories** for concise and consistent error creation
-- **TypeScript first** with ESM/CJS builds and `.d.ts` types
+- **Common error mapper** for popular libraries (Mongoose, JWT, Axios, Zod, etc.)
+- **Async wrapper & class decorator** `catchAsync` for safe handlers and controllers
+- **HTTP error factories** for concise, consistent error creation
+- **TypeScript first** with ESM + CJS builds and `.d.ts` types
 
 ## Install
 
@@ -15,15 +18,14 @@ A small, typed, framework-agnostic error toolkit tailored for Express.js apps:
 npm install @hiprax/errors
 ```
 
-Requires Node >= 18.12.
+Requires **Node >= 18.12** and **Express >= 4.x** (peer dependency).
 
-### Quick start
+## Quick Start
 
 ```ts
 import express from "express";
 import {
   errorMiddleware,
-  ErrorHandler,
   catchAsync,
   httpErrors,
 } from "@hiprax/errors";
@@ -40,7 +42,7 @@ app.get(
   })
 );
 
-// Always last
+// Always register last
 app.use(errorMiddleware);
 ```
 
@@ -48,48 +50,106 @@ app.use(errorMiddleware);
 
 ## API
 
-### `class ErrorHandler(message?: string, statusCode?: number)`
-
-- **message**: defaults to "Something went wrong! Please try again"
-- **statusCode**: defaults to 500, unknown codes normalize to 500
-- `.statusCode: number` and `.statusText?: string` are set based on a predefined map
-
-Example:
+### `ErrorHandler`
 
 ```ts
-throw new ErrorHandler("Not allowed", 403);
+new ErrorHandler(message?: string, statusCode?: number)
 ```
 
-### `errorMiddleware(err, req, res, next)`
+Custom `Error` subclass with HTTP semantics.
 
-Express error middleware that:
+| Parameter    | Default                                        | Description                                    |
+|--------------|------------------------------------------------|------------------------------------------------|
+| `message`    | `"Something went wrong! Please try again"`     | Error message                                  |
+| `statusCode` | `500`                                          | HTTP status code (unknown codes normalize to 500) |
 
-- Normalizes errors using `handleCommonErrors`
-- Maps popular codes like Mongo duplicate key (`11000`), CSRF, common network codes
-- Avoids writing after `headersSent`
-- Returns JSON: `{ success, message, statusCode, statusText, stack? }` (stack in non-production only)
+The instance exposes `.statusCode` and `.statusText` (resolved from the built-in status code map).
 
-Register as the last middleware:
+```ts
+import { ErrorHandler } from "@hiprax/errors";
+
+throw new ErrorHandler("Not allowed", 403);
+// => { message: "Not allowed", statusCode: 403, statusText: "Forbidden" }
+```
+
+---
+
+### `errorMiddleware`
+
+```ts
+errorMiddleware(err, req, res, next)
+```
+
+Express error middleware. Register it as the **last** middleware in your app.
+
+**Processing pipeline:**
+
+1. Normalizes the error via `handleCommonErrors` (by `err.name`)
+2. Maps well-known `err.code` values:
+
+   | `err.code`             | Status | Message                               |
+   |------------------------|--------|---------------------------------------|
+   | `"ENOENT"`             | 404    | Resource not found                    |
+   | `11000` (Mongo dup key)| 400    | Duplicate entry for field(s): ...     |
+   | `"EBADCSRFTOKEN"`      | 403    | Invalid CSRF token                    |
+   | `"ECONNREFUSED"` / `"ECONNRESET"` / `"ETIMEDOUT"` | 502 | Upstream network error |
+
+3. Checks `res.headersSent` to avoid double responses
+4. Responds with JSON:
+
+```json
+{
+  "success": false,
+  "message": "...",
+  "statusCode": 400,
+  "statusText": "Bad Request",
+  "stack": "..."
+}
+```
+
+> `stack` is only included when `NODE_ENV !== "production"`.
 
 ```ts
 app.use(errorMiddleware);
 ```
 
-### `handleCommonErrors(err)`
+---
 
-Maps common libraries/framework errors to `ErrorHandler`:
+### `handleCommonErrors`
 
-- `CastError`, `ValidationError`, `JsonWebTokenError`, `TokenExpiredError`, `AxiosError`, `SyntaxError`, `ZodError`
-- Pass-throughs message/statusCode where provided, else defaults to 500
+```ts
+handleCommonErrors(err: any): ErrorHandler
+```
 
-### `catchAsync(fnOrClass)`
+Maps common library/framework errors to `ErrorHandler` instances by `err.name`:
+
+| `err.name`           | Status | Behavior                                           |
+|----------------------|--------|----------------------------------------------------|
+| `CastError`          | 400    | Includes `err.path` in message (Mongoose)          |
+| `ValidationError`    | 400    | Joins all `err.errors[*].message` (Mongoose)       |
+| `JsonWebTokenError`  | 401    | Fixed JWT invalid/expired message                  |
+| `TokenExpiredError`  | 401    | Fixed JWT invalid/expired message                  |
+| `AxiosError`         | 502    | External service communication error               |
+| `SyntaxError`        | 400    | Malformed JSON or invalid syntax                   |
+| `ZodError`           | 400    | Joins `err.issues[*].message` (Zod)               |
+| _(default)_          | `err.statusCode` or 500 | Passes through `err.message` if present |
+
+---
+
+### `catchAsync`
+
+```ts
+catchAsync(fn): wrappedFn
+catchAsync(Class): Class        // as decorator
+```
 
 Dual-purpose utility:
 
-- Wrap a single handler to pass thrown/rejected errors to `next()` and prevent duplicate `next()` calls
-- Use as a class decorator to wrap all prototype methods of an Express controller
+- **Function wrapper** — wraps a single handler so thrown/rejected errors are forwarded to `next()`. Prevents duplicate `next()` calls. Preserves function arity and name for correct Express routing.
+- **Class decorator** — wraps all prototype methods (including inherited) of an Express controller class.
 
 ```ts
+// Function wrapper
 router.get(
   "/posts",
   catchAsync(async (req, res) => {
@@ -98,40 +158,79 @@ router.get(
   })
 );
 
+// Class decorator
 @catchAsync
 class UserController {
-  async getUser(req: express.Request, res: express.Response) {
+  async getUser(req: Request, res: Response) {
     res.json({ id: req.params.id });
   }
 }
 ```
 
-### HTTP error factories (namespaced)
+---
 
-Convenience helpers that return `ErrorHandler` instances with sensible defaults:
+### `httpErrors`
 
 ```ts
 import { httpErrors } from "@hiprax/errors";
+```
 
-throw httpErrors.notFound();
-throw httpErrors.forbidden("Only admins can do that");
+Namespaced factory functions that return `ErrorHandler` instances. Each accepts an optional `message` override.
+
+| Factory                | Code | Default Message          |
+|------------------------|------|--------------------------|
+| `httpErrors.badRequest`           | 400  | Bad request              |
+| `httpErrors.unauthorized`         | 401  | Unauthorized             |
+| `httpErrors.forbidden`            | 403  | Forbidden                |
+| `httpErrors.notFound`             | 404  | Not found                |
+| `httpErrors.methodNotAllowed`     | 405  | Method not allowed       |
+| `httpErrors.requestTimeout`       | 408  | Request timeout          |
+| `httpErrors.conflict`             | 409  | Conflict                 |
+| `httpErrors.gone`                 | 410  | Gone                     |
+| `httpErrors.payloadTooLarge`      | 413  | Payload too large        |
+| `httpErrors.unsupportedMediaType` | 415  | Unsupported media type   |
+| `httpErrors.unprocessableEntity`  | 422  | Unprocessable entity     |
+| `httpErrors.tooManyRequests`      | 429  | Too many requests        |
+| `httpErrors.internalServerError`  | 500  | Internal server error    |
+| `httpErrors.badGateway`           | 502  | Bad gateway              |
+| `httpErrors.serviceUnavailable`   | 503  | Service unavailable      |
+| `httpErrors.gatewayTimeout`       | 504  | Gateway timeout          |
+
+```ts
+throw httpErrors.notFound();                    // "Not found" (404)
+throw httpErrors.forbidden("Admins only");      // "Admins only" (403)
 ```
 
 ---
 
-## TypeScript and builds
+### `errorCodes`
 
-- ESM and CJS builds with an exports map
-- Full type declarations
-- Marked as `sideEffects: false` for optimal tree-shaking
+```ts
+import { errorCodes } from "@hiprax/errors";
+```
+
+A `Map<number, string>` of all standard HTTP 4xx/5xx status codes and their text descriptions. Used internally by `ErrorHandler` to validate codes and resolve `statusText`. Exported for advanced use cases (e.g., custom middleware or logging).
+
+```ts
+errorCodes.get(404); // "Not Found"
+errorCodes.get(418); // "I'm a teapot"
+```
+
+---
+
+## TypeScript & Builds
+
+- ESM (`.mjs`) and CJS (`.js`) builds via an `exports` map
+- Full `.d.ts` type declarations
+- `sideEffects: false` for optimal tree-shaking
 
 ## Testing
-
-This package ships with Jest tests exercising all modules. To run locally:
 
 ```bash
 npm test
 ```
+
+Runs the Jest test suite covering all modules.
 
 ## Contributing
 
@@ -139,4 +238,4 @@ Issues and PRs are welcome. Please include tests and keep the API surface small 
 
 ## License
 
-MIT © Hiprax
+MIT &copy; Hiprax
