@@ -15,8 +15,6 @@ updates:
       prefix: "deps"
       prefix-development: "deps-dev"
       include: "scope"
-    labels:
-      - "dependencies"
     groups:
       typescript-eslint:
         patterns:
@@ -53,9 +51,6 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
-    labels:
-      - "dependencies"
-      - "github-actions"
     groups:
       actions:
         patterns:
