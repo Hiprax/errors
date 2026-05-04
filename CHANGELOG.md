@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Internal
+
+- Dependabot configured for npm and `github-actions` ecosystems with weekly schedule and grouped updates so dev-only patch/minor bumps land as a single PR (`.github/dependabot.yml`)
+- CodeQL static analysis workflow (JavaScript/TypeScript, `security-and-quality` query suite) on push to main, on pull requests, and on a weekly schedule (`.github/workflows/codeql.yml`)
+- OpenSSF Scorecard supply-chain analysis with SARIF upload to GitHub code scanning and public results publication, runs on push and weekly (`.github/workflows/scorecard.yml`)
+- Release workflow now creates a GitHub Release after a successful npm publish, with the body extracted from the matching CHANGELOG section (`.github/workflows/release.yml`)
+- CI now collects test coverage on every Node matrix entry and uploads `lcov.info` to Codecov from the Node 22.x leg (`jest.config.js`, `.github/workflows/ci.yml`)
+- Issue and pull request templates added: bug report and feature request as YAML forms, blank issues disabled, PR checklist matching the project's pre-completion gates (`.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md`)
+- Added Codecov, CodeQL, and OpenSSF Scorecard badges to the README (`README.md`)
+
 ## [0.5.1] - 2026-05-04
 
 ### Internal
