@@ -1,78 +1,202 @@
-import type { Request, Response, NextFunction } from "express";
+import type { ErrorRequestHandler } from "express";
 import { handleCommonErrors } from "./handleCommonErrors";
 import ErrorHandler from "./ErrorHandler";
 
 /**
+ * Maximum size (in characters) for the serialized stack trace included in the
+ * non-production response body. Keeps the response bounded even when an error
+ * carries a pathologically large stack.
+ */
+const MAX_STACK_LENGTH = 10_000;
+
+/**
+ * Public response shape produced by {@link errorMiddleware}.
+ *
+ * Consumers (e.g. typed `fetch` wrappers, error parsers) can import this type
+ * to statically type the JSON body returned by the middleware.
+ */
+export interface ErrorPayload {
+  success: false;
+  message: string;
+  statusCode: number;
+  statusText: string | undefined;
+  stack?: string;
+}
+
+/**
+ * Safely read a string value from a property that may be backed by a throwing
+ * getter or a non-string value. Returns `fallback` if reading or coercion
+ * throws.
+ */
+function safeReadString(read: () => unknown, fallback: string): string {
+  try {
+    const value = read();
+    if (value === undefined || value === null) return fallback;
+    // String() can also call a throwing toString; guard that too.
+    return String(value);
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Returns a JSON.stringify replacer that strips circular references and
+ * non-serializable values (e.g. BigInt, functions) so a sanitized payload can
+ * be serialized after a primary stringify failure.
+ */
+function createSafeReplacer(): (key: string, value: unknown) => unknown {
+  const seen = new WeakSet<object>();
+  return (_key, value) => {
+    if (typeof value === "bigint") return `${value.toString()}n`;
+    if (typeof value === "function" || typeof value === "symbol") return undefined;
+    if (typeof value === "object" && value !== null) {
+      if (seen.has(value as object)) return "[Circular]";
+      seen.add(value as object);
+    }
+    return value;
+  };
+}
+
+/**
  * Express middleware for handling errors.
- * Intercepts errors thrown in the application, processes them using `handleCommonErrors`,
- * and sends a standardized JSON response.
+ * Intercepts errors thrown in the application, processes them using
+ * {@link handleCommonErrors}, and sends a standardized JSON response.
  *
- * @param {any} err - The original error object.
- * @param {Request} _req - The incoming HTTP request (unused in this middleware).
- * @param {Response} res - The outgoing HTTP response.
- * @param {NextFunction} _next - The next middleware function (unused in this middleware).
+ * The middleware is hardened against errors whose `message` or `stack`
+ * accessors throw, against payloads that fail JSON serialization (circular
+ * references, BigInt, etc.), and against pathologically large stack traces.
  *
- * @returns {void}
+ * When `res.headersSent` is true the middleware delegates to Express's
+ * default error handler (`next(err)`) so its well-tested teardown logic can
+ * close the connection. The original (un-normalized) error is forwarded so
+ * the default handler can log the real underlying cause.
  *
  * @example
  * app.use(errorMiddleware);
  */
-const errorMiddleware = (
-  err: any,
-  _req: Request,
-  res: Response,
-  _next: NextFunction
-): void => {
-  // Normalize to our ErrorHandler using common mappers
-  let error = handleCommonErrors(err);
+const errorMiddleware: ErrorRequestHandler = (err, _req, res, _next) => {
+  // Normalize to our ErrorHandler using common mappers. If the mapper itself
+  // throws (e.g. a hostile error whose `.message` getter throws while the
+  // mapper inspects it), fall back to a generic 500 so the middleware can
+  // still produce a response.
+  let error: ErrorHandler;
+  try {
+    error = handleCommonErrors(err);
+  } catch {
+    error = new ErrorHandler("Unexpected error occurred", 500);
+  }
 
-  // Map various known Node/Mongo/Network codes to friendlier messages
+  // Map various known Node/Mongo/Network codes to friendlier messages.
+  // Each branch forwards the original error as `cause` so structured loggers
+  // (Pino, Sentry, Node 22+ console.error) can walk `err.cause` back to the
+  // raw upstream error (Mongo duplicate-key, FS ENOENT, network failure, etc.).
   switch (err?.code) {
     case "ENOENT":
-      error = new ErrorHandler("Resource not found", 404);
+      error = new ErrorHandler("Resource not found", 404, { cause: err });
       break;
     case 11000: {
       const duplicateField =
         Object.keys(err.keyValue || {}).join(", ") || "unknown";
       error = new ErrorHandler(
         `Duplicate entry for field(s): ${duplicateField}`,
-        400
+        400,
+        { cause: err }
       );
       break;
     }
     case "EBADCSRFTOKEN":
-      error = new ErrorHandler("Invalid CSRF token", 403);
+      error = new ErrorHandler("Invalid CSRF token", 403, { cause: err });
       break;
     case "ECONNREFUSED":
     case "ECONNRESET":
     case "ETIMEDOUT":
-      error = new ErrorHandler("Upstream network error", 502);
+      error = new ErrorHandler("Upstream network error", 502, { cause: err });
       break;
     default:
       break;
   }
 
   if (res.headersSent) {
-    // Avoid writing after headers were sent; just end the response
+    // Per Express's documented contract, when the response has already been
+    // partially written we must delegate to the default error handler so it
+    // can finalize/close the connection. Forward the *original* error so the
+    // built-in handler logs the real cause, not our normalized facade.
+    if (typeof _next === "function") {
+      return _next(err);
+    }
+    // Defensive fallback: if a caller passed something other than a function
+    // for next (unusual outside of tests), end the response so we don't hang.
     try {
       res.end();
-    } catch {}
+    } catch {
+      /* swallow */
+    }
     return;
   }
 
+  // Safely derive the response strings; never let a hostile getter escape.
+  const safeMessage = safeReadString(
+    () => error.message,
+    "Error message unavailable"
+  );
+  const safeStatusText = (() => {
+    try {
+      return error.statusText;
+    } catch {
+      return undefined;
+    }
+  })();
+
   const isProd = process.env.NODE_ENV === "production";
-  const payload: Record<string, any> = {
+
+  const payload: ErrorPayload = {
     success: false,
-    message: error.message,
+    message: safeMessage,
     statusCode: error.statusCode,
-    statusText: error.statusText,
+    statusText: safeStatusText,
   };
 
-  if (!isProd && err?.stack) {
-    payload.stack = String(err.stack);
+  if (!isProd) {
+    let safeStack: string | undefined;
+    try {
+      const raw = err?.stack;
+      if (raw !== undefined && raw !== null) {
+        safeStack = String(raw);
+      }
+    } catch {
+      safeStack = "Stack trace unavailable";
+    }
+    if (typeof safeStack === "string") {
+      if (safeStack.length > MAX_STACK_LENGTH) {
+        safeStack =
+          safeStack.slice(0, MAX_STACK_LENGTH) + "\n... [stack truncated]";
+      }
+      payload.stack = safeStack;
+    }
   }
 
-  res.status(error.statusCode).json(payload);
+  // Send the response. Guard against res.json throwing (monkey-patched res,
+  // payload that fails to serialize, etc.) by retrying with a sanitized
+  // payload, and finally falling back to plain text.
+  try {
+    res.status(error.statusCode).json(payload);
+  } catch {
+    try {
+      const sanitized = JSON.parse(
+        JSON.stringify(payload, createSafeReplacer())
+      );
+      res.status(error.statusCode).json(sanitized);
+    } catch {
+      try {
+        res
+          .status(error.statusCode)
+          .type("text/plain")
+          .send(safeStatusText || "Internal Server Error");
+      } catch {
+        /* nothing more we can do */
+      }
+    }
+  }
 };
 
 export default errorMiddleware;

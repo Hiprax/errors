@@ -1,4 +1,5 @@
 import { ErrorHandler, errorCodes } from "../src";
+import type { ErrorHandlerOptions } from "../src";
 
 describe("ErrorHandler", () => {
   it("creates a default 500 error when no args provided", () => {
@@ -70,5 +71,59 @@ describe("ErrorHandler", () => {
       expect(err.statusCode).toBe(code);
       expect(err.statusText).toBe(expectedText);
     }
+  });
+
+  describe("cause option (Task 14b)", () => {
+    it("preserves cause when provided", () => {
+      const original = new Error("original failure");
+      const err = new ErrorHandler("wrapped", 500, { cause: original });
+      expect(err.cause).toBe(original);
+      expect(err.message).toBe("wrapped");
+      expect(err.statusCode).toBe(500);
+    });
+
+    it("preserves cause for non-Error values (string, object)", () => {
+      const errString = new ErrorHandler("wrapped", 400, {
+        cause: "raw string cause",
+      });
+      expect(errString.cause).toBe("raw string cause");
+
+      const opaque = { code: "EX", reason: "test" };
+      const errObj = new ErrorHandler("wrapped", 400, { cause: opaque });
+      expect(errObj.cause).toBe(opaque);
+    });
+
+    it(".cause is undefined when not provided", () => {
+      const err = new ErrorHandler("no cause", 400);
+      expect(err.cause).toBeUndefined();
+    });
+
+    it(".cause is undefined when empty options bag is provided", () => {
+      const err = new ErrorHandler("no cause", 400, {});
+      expect(err.cause).toBeUndefined();
+    });
+
+    it("works with options but no message/statusCode (uses defaults)", () => {
+      const original = new Error("root");
+      const err = new ErrorHandler(undefined, undefined, { cause: original });
+      expect(err.cause).toBe(original);
+      expect(err.statusCode).toBe(500);
+      expect(err.message).toContain("Something went wrong");
+    });
+
+    it("normalizes unknown status codes to 500 even when cause is provided", () => {
+      const err = new ErrorHandler("x", 999 as any, { cause: new Error("c") });
+      expect(err.statusCode).toBe(500);
+      expect(err.cause).toBeInstanceOf(Error);
+    });
+  });
+
+  it("re-exports ErrorHandlerOptions type from package entry point", () => {
+    // Compile-time assertion: the type is importable from the package entry
+    // point and assignable to a concrete options bag value passed to the
+    // ErrorHandler constructor.
+    const opts: ErrorHandlerOptions = { cause: new Error("x") };
+    const err = new ErrorHandler("msg", 500, opts);
+    expect(err.cause).toBe(opts.cause);
   });
 });

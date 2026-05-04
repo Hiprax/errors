@@ -11,7 +11,9 @@
     "declaration": true,
     "isolatedModules": true,
     "noEmit": true,
-    "outDir": "./dist"
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "ignoreDeprecations": "6.0"
   },
   "include": ["src"],
   "exclude": ["node_modules"]

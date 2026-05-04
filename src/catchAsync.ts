@@ -1,3 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any --
+ * `any` is used throughout this file by design: Express handler signatures
+ * (err: any), variadic Function.apply payloads (...args: any[]), and the
+ * generic class-constructor type (new (...args: any[]) => any) all require
+ * `any` to remain compatible with arbitrary user-defined controllers and
+ * middleware shapes.
+ */
 import type {
   NextFunction,
   RequestHandler,
@@ -20,6 +27,52 @@ type AnyRequestHandler =
       res: Response,
       next: NextFunction
     ) => Promise<any>);
+
+/**
+ * Symbol marker used to detect functions/classes already wrapped by catchAsync.
+ * `Symbol.for(...)` ensures the marker is shared across realms / multiple loaded
+ * copies of the package (e.g., in monorepos), so the idempotence guard remains
+ * effective even when more than one instance of `@hiprax/errors` is present in
+ * the same process.
+ */
+const WRAPPED: symbol = Symbol.for("@hiprax/errors:catchAsync.wrapped");
+
+/**
+ * Returns true when the given value has already been wrapped by catchAsync.
+ *
+ * @param value Any value (typically a function or class).
+ * @returns True if the value carries the WRAPPED marker.
+ */
+function isAlreadyWrapped(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value !== "function" && typeof value !== "object") return false;
+  try {
+    return (value as Record<symbol, unknown>)[WRAPPED] === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Marks a function or class as wrapped by catchAsync. Used by the idempotence
+ * guard in `wrapHandler` and `wrapControllerClass` so subsequent calls become
+ * no-ops instead of producing nested wrappers.
+ *
+ * @param value The function or class to mark.
+ */
+function markWrapped(value: object): void {
+  try {
+    Object.defineProperty(value, WRAPPED, {
+      value: true,
+      enumerable: false,
+      configurable: true,
+      writable: false,
+    });
+  } catch {
+    // Frozen/sealed targets cannot be marked. The guard simply degrades
+    // gracefully by performing the wrap again on subsequent calls.
+  }
+}
 
 /**
  * Checks if a value is a function.
@@ -59,6 +112,14 @@ function isClassConstructor(fn: Function): boolean {
  */
 function wrapHandler<Fn extends AnyRequestHandler>(fn: Fn): Fn {
   if (!isFunction(fn)) {
+    return fn;
+  }
+
+  // Idempotence guard: if the input is already a catchAsync-wrapped handler,
+  // returning it unchanged avoids producing nested wrappers (which would cost
+  // an extra stack frame per call and run two error normalizations on every
+  // throw — see Task 10 in FIX.md).
+  if (isAlreadyWrapped(fn)) {
     return fn;
   }
 
@@ -162,12 +223,25 @@ function wrapHandler<Fn extends AnyRequestHandler>(fn: Fn): Fn {
     }
   }
 
+  // Tag the wrapper so a subsequent `catchAsync(wrapped)` becomes a no-op.
+  markWrapped(wrapped);
+
   return wrapped as Fn;
 }
 
 /**
  * Wraps all own methods on the prototype of a controller class with the
  * async handler wrapper. This is intended for use as a class decorator.
+ *
+ * Inheritance behavior:
+ *  - Methods defined directly on the decorated class' prototype are wrapped
+ *    in place (shadowing is unnecessary because they already live on the
+ *    target prototype).
+ *  - Methods inherited from a parent class are NOT modified on the parent
+ *    prototype. Instead, a wrapped version is installed as an own property on
+ *    the decorated child's prototype, where it shadows the inherited method.
+ *    This keeps the parent class — and any sibling subclasses sharing it —
+ *    untouched.
  *
  * @param constructor The class constructor function.
  * @returns The same constructor function, with methods modified.
@@ -185,46 +259,75 @@ function wrapControllerClass<T extends new (...args: any[]) => any>(
     return constructor;
   }
 
-  // Track processed prototypes to avoid circular dependencies
-  const processedPrototypes = new WeakSet();
-
-  function processPrototype(prototype: object) {
-    if (processedPrototypes.has(prototype)) {
-      return;
-    }
-    processedPrototypes.add(prototype);
-
-    // Get all property names including non-enumerable ones
-    const propertyNames = Object.getOwnPropertyNames(prototype);
-
-    for (const key of propertyNames) {
-      // Skip the constructor itself
-      if (key === "constructor") continue;
-
-      const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
-
-      // Skip properties that don't exist, aren't functions, or are getters/setters
-      if (descriptor && isFunction(descriptor.value)) {
-        // Wrap the method using the handler wrapper
-        const originalMethod = descriptor.value as AnyRequestHandler;
-        const wrappedMethod = wrapHandler(originalMethod);
-
-        // Replace the original method on the prototype with the wrapped version
-        Object.defineProperty(prototype, key, {
-          ...descriptor,
-          value: wrappedMethod,
-        });
-      }
-    }
-
-    // Process the prototype chain
-    const parentPrototype = Object.getPrototypeOf(prototype);
-    if (parentPrototype && parentPrototype !== Object.prototype) {
-      processPrototype(parentPrototype);
-    }
+  // Idempotence guard: re-decorating the same class is a no-op (Task 10).
+  if (isAlreadyWrapped(constructor)) {
+    return constructor;
   }
 
-  processPrototype(constructor.prototype);
+  const targetPrototype = constructor.prototype as object;
+
+  // ---- Step 1: wrap own methods on the target prototype in place. ----
+  const ownNames = Object.getOwnPropertyNames(targetPrototype);
+  for (const key of ownNames) {
+    if (key === "constructor") continue;
+    const descriptor = Object.getOwnPropertyDescriptor(targetPrototype, key);
+    if (!descriptor || !isFunction(descriptor.value)) continue;
+    const originalMethod = descriptor.value as AnyRequestHandler;
+    if (isAlreadyWrapped(originalMethod)) continue;
+    const wrappedMethod = wrapHandler(originalMethod);
+    Object.defineProperty(targetPrototype, key, {
+      ...descriptor,
+      value: wrappedMethod,
+    });
+  }
+
+  // ---- Step 2: walk parent prototypes and SHADOW inherited methods on
+  // the child's prototype. Parent prototypes are read-only here. ----
+  // The WeakSet protects against pathological prototype chains that loop
+  // back on themselves; it is per-decoration, not a global "I touched this
+  // prototype" guard, so unrelated decorations do not interfere.
+  const visitedParents = new WeakSet<object>();
+  let parentPrototype: object | null = Object.getPrototypeOf(targetPrototype);
+
+  while (
+    parentPrototype &&
+    parentPrototype !== Object.prototype &&
+    !visitedParents.has(parentPrototype)
+  ) {
+    visitedParents.add(parentPrototype);
+
+    const parentNames = Object.getOwnPropertyNames(parentPrototype);
+    for (const key of parentNames) {
+      if (key === "constructor") continue;
+      // Don't shadow if the child (or a closer ancestor we already shadowed
+      // onto the child) already has its own descriptor for this key.
+      if (Object.prototype.hasOwnProperty.call(targetPrototype, key)) continue;
+
+      const descriptor = Object.getOwnPropertyDescriptor(
+        parentPrototype,
+        key
+      );
+      if (!descriptor || !isFunction(descriptor.value)) continue;
+
+      const originalMethod = descriptor.value as AnyRequestHandler;
+      // Inherited method is already wrapped (e.g., parent was decorated):
+      // copy the same reference onto the child without re-wrapping.
+      const wrappedMethod = isAlreadyWrapped(originalMethod)
+        ? originalMethod
+        : wrapHandler(originalMethod);
+
+      // Install the wrapped version on the CHILD prototype only.
+      Object.defineProperty(targetPrototype, key, {
+        ...descriptor,
+        value: wrappedMethod,
+      });
+    }
+
+    parentPrototype = Object.getPrototypeOf(parentPrototype);
+  }
+
+  // Tag the constructor so re-decorating becomes a no-op (Task 10).
+  markWrapped(constructor);
 
   return constructor;
 }
@@ -235,8 +338,10 @@ function wrapControllerClass<T extends new (...args: any[]) => any>(
  */
 
 /**
- * Use as a class decorator to wrap all own methods on the prototype
- * of an Express controller class.
+ * Use as a legacy / experimental (TS `experimentalDecorators: true`) class
+ * decorator to wrap all own methods on the prototype of an Express controller
+ * class. This overload also covers the manual call-site
+ * `catchAsync(MyClass)`.
  *
  * @example
  * import { Request, Response } from 'express';
@@ -276,6 +381,23 @@ export function catchAsync<T extends new (...args: any[]) => any>(
 ): T;
 
 /**
+ * Use as a stage-3 ECMAScript class decorator (TypeScript 5.x default,
+ * `experimentalDecorators: false`). The runtime ignores `context` — the
+ * second argument exists only to satisfy the modern decorator contract:
+ * `(value, context: ClassDecoratorContext) => value`.
+ *
+ * The same `@catchAsync class Foo {}` syntax compiles cleanly under both
+ * legacy and stage-3 decorator modes thanks to this overload.
+ *
+ * @param value The class constructor function being decorated.
+ * @param context The stage-3 ClassDecoratorContext supplied by the runtime.
+ */
+export function catchAsync<T extends new (...args: any[]) => any>(
+  value: T,
+  context: ClassDecoratorContext
+): T;
+
+/**
  * Use as a function wrapper for a single Express middleware or error handler.
  * Ensures that rejected promises or thrown errors are passed to `next()`.
  *
@@ -307,14 +429,23 @@ export function catchAsync<Fn extends AnyRequestHandler>(fn: Fn): Fn;
  * Dual-purpose utility that wraps Express middleware functions to handle
  * async errors, or is used as a class decorator to wrap controller methods.
  *
- * The correct usage is inferred from the type of the single argument provided.
+ * The correct usage is inferred from the type of the first argument provided.
+ *
+ * The optional second argument (`_context`) is accepted to satisfy the
+ * stage-3 ECMAScript class decorator contract — TypeScript 5.x calls a class
+ * decorator as `decorator(value, context: ClassDecoratorContext)`. The
+ * runtime ignores it; the same code path drives legacy decorators
+ * (`experimentalDecorators: true`), stage-3 decorators, and manual
+ * `catchAsync(MyClass)` calls.
  *
  * @param target The function (middleware/handler) or class constructor to wrap.
+ * @param _context Optional decorator context (stage-3 only); ignored at runtime.
  * @returns The wrapped function or class.
  * @throws {TypeError} If the target is neither a function nor a class constructor.
  */
 export function catchAsync(
-  target: Function | (new (...args: any[]) => any)
+  target: Function | (new (...args: any[]) => any),
+  _context?: unknown
 ): any {
   // Handle null/undefined inputs
   if (target == null) {

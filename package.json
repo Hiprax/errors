@@ -1,21 +1,31 @@
 {
   "name": "@hiprax/errors",
-  "version": "0.2.2",
+  "version": "0.5.1",
   "description": "A modular error handling solution for Express.js applications.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "default": "./dist/index.mjs"
     }
   },
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
-    "test": "jest"
+    "test": "jest",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src tests --max-warnings=0",
+    "lint:fix": "eslint src tests --fix",
+    "check-types-pack": "attw --pack ."
   },
   "files": [
     "dist"
@@ -26,9 +36,21 @@
   },
   "keywords": [
     "error",
-    "middleware",
+    "errors",
+    "error-handling",
+    "error-handler",
+    "error-middleware",
     "express",
-    "typescript"
+    "express-middleware",
+    "typescript",
+    "http-errors",
+    "async-handler",
+    "catch-async",
+    "mongoose",
+    "zod",
+    "jwt",
+    "axios",
+    "aggregate-error"
   ],
   "author": "Hiprax",
   "license": "MIT",
@@ -39,14 +61,20 @@
   "engines": {
     "node": ">=18.12"
   },
-  "dependencies": {},
   "devDependencies": {
-    "@types/express": "^5.0.3",
+    "@arethetypeswrong/cli": "^0.18.2",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
-    "jest": "^30.2.0",
-    "ts-jest": "^29.4.4",
-    "tsup": "^8.5.0",
-    "typescript": "^5.9.2"
+    "@types/supertest": "^7.2.0",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "express": "^5.2.1",
+    "jest": "^30.3.0",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.9",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.1"
   },
   "peerDependencies": {
     "express": ">=4.x"

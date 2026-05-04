@@ -1,4 +1,5 @@
 import { httpErrors, ErrorHandler } from "../src";
+import type { ErrorFactory } from "../src";
 
 describe("httpErrors utilities", () => {
   it("creates 400 for badRequest with default message", () => {
@@ -91,6 +92,19 @@ describe("httpErrors utilities", () => {
     expect(err.message).toBe("Too many requests");
   });
 
+  it("creates 501 for notImplemented with default message", () => {
+    const err = httpErrors.notImplemented();
+    expect(err.statusCode).toBe(501);
+    expect(err.message).toBe("Not implemented");
+    expect(err.statusText).toBe("Not Implemented");
+  });
+
+  it("allows custom message override on notImplemented", () => {
+    const err = httpErrors.notImplemented("Stub endpoint");
+    expect(err.statusCode).toBe(501);
+    expect(err.message).toBe("Stub endpoint");
+  });
+
   it("creates 502 for badGateway with default message", () => {
     const err = httpErrors.badGateway();
     expect(err.statusCode).toBe(502);
@@ -124,6 +138,7 @@ describe("httpErrors utilities", () => {
       httpErrors.unprocessableEntity,
       httpErrors.tooManyRequests,
       httpErrors.internalServerError,
+      httpErrors.notImplemented,
       httpErrors.badGateway,
       httpErrors.serviceUnavailable,
       httpErrors.gatewayTimeout,
@@ -140,5 +155,70 @@ describe("httpErrors utilities", () => {
     const err = httpErrors.unauthorized("Custom");
     expect(err.statusCode).toBe(401);
     expect(err.message).toBe("Custom");
+  });
+
+  it("re-exports ErrorFactory type from package entry point and matches httpErrors factory shape", () => {
+    // Compile-time assertion: factory values are assignable to ErrorFactory type
+    const f: ErrorFactory = httpErrors.notFound;
+    const g: ErrorFactory = httpErrors.badRequest;
+    expect(typeof f).toBe("function");
+    expect(typeof g).toBe("function");
+    const err = f("custom not found");
+    expect(err).toBeInstanceOf(ErrorHandler);
+    expect(err.statusCode).toBe(404);
+    expect(err.message).toBe("custom not found");
+  });
+
+  describe("cause option (Task 14b)", () => {
+    it("forwards cause to the produced ErrorHandler from notFound", () => {
+      const original = new Error("db row missing");
+      const err = httpErrors.notFound("User not found", { cause: original });
+      expect(err).toBeInstanceOf(ErrorHandler);
+      expect(err.statusCode).toBe(404);
+      expect(err.message).toBe("User not found");
+      expect(err.cause).toBe(original);
+    });
+
+    it("forwards cause when message is omitted (uses default message)", () => {
+      const original = new Error("driver-level failure");
+      const err = httpErrors.conflict(undefined, { cause: original });
+      expect(err.statusCode).toBe(409);
+      expect(err.message).toBe("Conflict");
+      expect(err.cause).toBe(original);
+    });
+
+    it(".cause is undefined when options not provided", () => {
+      const err = httpErrors.badRequest("nope");
+      expect(err.cause).toBeUndefined();
+    });
+
+    it("supports cause across all factories", () => {
+      const original = new Error("source");
+      const factories: Array<[ErrorFactory, number]> = [
+        [httpErrors.badRequest, 400],
+        [httpErrors.unauthorized, 401],
+        [httpErrors.forbidden, 403],
+        [httpErrors.notFound, 404],
+        [httpErrors.methodNotAllowed, 405],
+        [httpErrors.requestTimeout, 408],
+        [httpErrors.conflict, 409],
+        [httpErrors.gone, 410],
+        [httpErrors.payloadTooLarge, 413],
+        [httpErrors.unsupportedMediaType, 415],
+        [httpErrors.unprocessableEntity, 422],
+        [httpErrors.tooManyRequests, 429],
+        [httpErrors.internalServerError, 500],
+        [httpErrors.notImplemented, 501],
+        [httpErrors.badGateway, 502],
+        [httpErrors.serviceUnavailable, 503],
+        [httpErrors.gatewayTimeout, 504],
+      ];
+
+      for (const [factory, expectedCode] of factories) {
+        const err = factory(undefined, { cause: original });
+        expect(err.statusCode).toBe(expectedCode);
+        expect(err.cause).toBe(original);
+      }
+    });
   });
 });

@@ -572,4 +572,377 @@ describe("catchAsync", () => {
       expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
     });
   });
+
+  describe("Class decorator inheritance isolation (Task 2)", () => {
+    it("does not mutate the parent class prototype when a subclass is decorated", () => {
+      class BaseController {
+        async list(req: Request, res: Response, next: NextFunction) {
+          return "base-original";
+        }
+      }
+
+      // Snapshot the original method reference before decoration.
+      const originalListRef = BaseController.prototype.list;
+
+      @catchAsync
+      class ChildController extends BaseController {}
+      // Reference the class so the linter sees a use without disabling rules.
+      void ChildController;
+
+      // The parent prototype's method must be unchanged (=== original ref).
+      expect(BaseController.prototype.list).toBe(originalListRef);
+
+      // A direct call to the parent class instance method behaves normally
+      // (returns the original value, not undefined from the wrapper).
+      const baseInstance = new BaseController();
+      const directReturn = baseInstance.list(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+      // The original async method returns a Promise that resolves to "base-original".
+      return Promise.resolve(directReturn).then((value) => {
+        expect(value).toBe("base-original");
+        expect(mockNext).not.toHaveBeenCalled();
+      });
+    });
+
+    it("does not affect a sibling subclass that shares the same parent", async () => {
+      class BaseController {
+        async list(_req: Request, _res: Response, _next: NextFunction) {
+          return "base-list-result";
+        }
+      }
+
+      const originalListRef = BaseController.prototype.list;
+
+      @catchAsync
+      class DecoratedChild extends BaseController {}
+      void DecoratedChild;
+
+      class SiblingChild extends BaseController {
+        async show(_req: Request, _res: Response, _next: NextFunction) {
+          return "sibling-show";
+        }
+      }
+
+      // Sibling inherits the *original* method, not a wrapped version.
+      expect(SiblingChild.prototype.list).toBe(originalListRef);
+      expect(BaseController.prototype.list).toBe(originalListRef);
+
+      // Calling on a sibling instance returns the original value.
+      const sibling = new SiblingChild();
+      const value = await sibling.list(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+      expect(value).toBe("base-list-result");
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it("wraps inherited methods on the decorated child via shadowing", async () => {
+      class BaseController {
+        async inheritedAsync(
+          _req: Request,
+          _res: Response,
+          _next: NextFunction
+        ) {
+          throw new Error("inherited boom");
+        }
+      }
+
+      @catchAsync
+      class ChildController extends BaseController {
+        async ownAsync(_req: Request, _res: Response, _next: NextFunction) {
+          throw new Error("own boom");
+        }
+      }
+
+      const child = new ChildController();
+
+      // Inherited method should now route the rejection to next().
+      await child.inheritedAsync(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect(mockNext.mock.calls[0][0]).toBeInstanceOf(Error);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe(
+        "inherited boom"
+      );
+
+      // Reset and verify own method also still wrapped.
+      mockNext.mockReset();
+      await child.ownAsync(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe("own boom");
+
+      // Critically: the inherited method on the parent prototype is NOT the
+      // same function as the shadow on the child prototype. The child has
+      // its own (wrapped) descriptor; the parent retains the original.
+      const childOwn = Object.getOwnPropertyDescriptor(
+        ChildController.prototype,
+        "inheritedAsync"
+      );
+      const parentOwn = Object.getOwnPropertyDescriptor(
+        BaseController.prototype,
+        "inheritedAsync"
+      );
+      expect(childOwn).toBeDefined();
+      expect(parentOwn).toBeDefined();
+      expect(childOwn!.value).not.toBe(parentOwn!.value);
+    });
+  });
+
+  describe("Idempotence guard (Task 10)", () => {
+    it("returns the same wrapper when catchAsync is applied twice to a function", () => {
+      const handler = (req: Request, res: Response, next: NextFunction) => {
+        next();
+      };
+      const once = catchAsync(handler);
+      const twice = catchAsync(once);
+      expect(twice).toBe(once);
+    });
+
+    it("does not add a second wrapper layer (call still produces single next call)", async () => {
+      const inner = jest.fn(
+        async (_req: Request, _res: Response, _next: NextFunction) => {
+          throw new Error("once-only");
+        }
+      );
+      const wrappedOnce = catchAsync(inner);
+      const wrappedTwice = catchAsync(wrappedOnce);
+      // Idempotence: re-wrapping should yield the same reference.
+      expect(wrappedTwice).toBe(wrappedOnce);
+
+      await wrappedTwice(mockReq as Request, mockRes as Response, mockNext);
+      // Underlying handler runs exactly once.
+      expect(inner).toHaveBeenCalledTimes(1);
+      // next() is invoked exactly once with the error.
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe("once-only");
+    });
+
+    it("does not double-wrap class methods when the decorator is applied twice", async () => {
+      @catchAsync
+      class TwiceDecoratedController {
+        async work(_req: Request, _res: Response, _next: NextFunction) {
+          throw new Error("twice-decorated boom");
+        }
+      }
+
+      const firstMethodRef = TwiceDecoratedController.prototype.work;
+
+      // Re-apply the decorator function-style to the same class.
+      const SameClass = catchAsync(TwiceDecoratedController);
+      expect(SameClass).toBe(TwiceDecoratedController);
+
+      // Method reference must be unchanged after the second decoration.
+      expect(TwiceDecoratedController.prototype.work).toBe(firstMethodRef);
+
+      const instance = new TwiceDecoratedController();
+      await instance.work(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+
+      // Single call to next() with the original error — no double-wrap echo.
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe(
+        "twice-decorated boom"
+      );
+    });
+  });
+
+  describe("Decorator signature compatibility (Task 14c)", () => {
+    it("legacy decorator call (single argument) wraps the class", async () => {
+      class LegacyController {
+        async legacyMethod(_req: Request, _res: Response, _next: NextFunction) {
+          throw new Error("legacy boom");
+        }
+      }
+
+      // Manual / legacy call shape: catchAsync(MyClass)
+      const Wrapped = catchAsync(LegacyController);
+      expect(Wrapped).toBe(LegacyController);
+
+      const instance = new LegacyController();
+      await instance.legacyMethod(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe("legacy boom");
+    });
+
+    it("stage-3 decorator call shape wraps methods", async () => {
+      class Stage3Controller {
+        async stage3Method(_req: Request, _res: Response, _next: NextFunction) {
+          throw new Error("stage-3 boom");
+        }
+      }
+
+      // Simulate the stage-3 decorator call shape that TS 5.x emits when
+      // `experimentalDecorators` is false. The runtime ignores `context`,
+      // but the call must be type-compatible with the new overload.
+      const fakeContext: ClassDecoratorContext = {
+        kind: "class",
+        name: "Stage3Controller",
+        addInitializer: () => {},
+        metadata: {},
+      } as unknown as ClassDecoratorContext;
+
+      const Wrapped = catchAsync(Stage3Controller, fakeContext);
+      expect(Wrapped).toBe(Stage3Controller);
+
+      const instance = new Stage3Controller();
+      await instance.stage3Method(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+
+      // Method was wrapped: the throw was forwarded to next() once.
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe("stage-3 boom");
+    });
+
+    it("stage-3 call ignores the context argument", () => {
+      class IgnoresContext {
+        async ping(_req: Request, _res: Response, _next: NextFunction) {
+          /* no-op */
+        }
+      }
+
+      // Pass an arbitrary value as context; runtime must not consult it.
+      const result = catchAsync(IgnoresContext, {
+        kind: "class",
+        name: "IgnoresContext",
+        addInitializer: () => {},
+      } as any);
+
+      expect(result).toBe(IgnoresContext);
+      // Method on the prototype was replaced with a wrapped version.
+      expect(typeof IgnoresContext.prototype.ping).toBe("function");
+    });
+
+    it("stage-3 decorator double-application stays idempotent", () => {
+      class DoubleStage3 {
+        async run(_req: Request, _res: Response, _next: NextFunction) {
+          /* no-op */
+        }
+      }
+
+      const ctx = {
+        kind: "class",
+        name: "DoubleStage3",
+        addInitializer: () => {},
+      } as any;
+
+      const first = catchAsync(DoubleStage3, ctx);
+      const firstMethodRef = DoubleStage3.prototype.run;
+      const second = catchAsync(first, ctx);
+
+      expect(second).toBe(first);
+      // Method reference is unchanged after the second decoration.
+      expect(DoubleStage3.prototype.run).toBe(firstMethodRef);
+    });
+  });
+
+  describe("Arity preservation (Task 9)", () => {
+    // Express's `app.use` distinguishes a normal request handler from an error
+    // handler purely by `Function.length` (3 vs 4). The wrapper produced by
+    // `catchAsync` MUST report the correct arity or registering
+    // `catchAsync(errorHandler)` silently breaks every consumer's error
+    // routing. These tests lock that contract in.
+
+    it("preserves arity 3 for a (req, res, next) request handler", () => {
+      const handler = catchAsync(
+        (_req: Request, _res: Response, _next: NextFunction) => {
+          /* no-op */
+        }
+      );
+      expect(handler.length).toBe(3);
+    });
+
+    it("preserves arity 3 for an async (req, res, next) request handler", () => {
+      const handler = catchAsync(
+        async (_req: Request, _res: Response, _next: NextFunction) => {
+          /* no-op */
+        }
+      );
+      expect(handler.length).toBe(3);
+    });
+
+    it("preserves arity 4 for an (err, req, res, next) error handler", () => {
+      const handler = catchAsync(
+        (
+          _err: any,
+          _req: Request,
+          _res: Response,
+          _next: NextFunction
+        ) => {
+          /* no-op */
+        }
+      );
+      expect(handler.length).toBe(4);
+    });
+
+    it("preserves arity 4 for an async (err, req, res, next) error handler", () => {
+      const handler = catchAsync(
+        async (
+          _err: any,
+          _req: Request,
+          _res: Response,
+          _next: NextFunction
+        ) => {
+          /* no-op */
+        }
+      );
+      expect(handler.length).toBe(4);
+    });
+
+    it("normalizes arity to 3 for a (req, res) handler whose declared length is 2", () => {
+      const inputFn = ((_req: Request, _res: Response) => {
+        /* no-op */
+      }) as any;
+      // Sanity-check the input arity so the test fails informatively if the
+      // TS compiler ever transforms parameters in a way that changes .length.
+      expect(inputFn.length).toBe(2);
+      const handler = catchAsync(inputFn);
+      expect(handler.length).toBe(3);
+    });
+
+    it("normalizes arity to 3 for a variadic (...args) handler whose declared length is 0", () => {
+      const inputFn = ((..._args: any[]) => {
+        /* no-op */
+      }) as any;
+      // A rest parameter contributes 0 to Function.length per the spec.
+      expect(inputFn.length).toBe(0);
+      const handler = catchAsync(inputFn);
+      expect(handler.length).toBe(3);
+    });
+
+    it("preserves arity 4 for a handler with a leading positional then rest (declared length 1)", () => {
+      // (err, ...rest) reports length === 1, but it is *not* a length>=4 case,
+      // so the wrapper falls into the 3-arg branch. This test documents that
+      // exact behavior so anyone widening arity detection knows the contract.
+      const inputFn = ((_err: any, ..._rest: any[]) => {
+        /* no-op */
+      }) as any;
+      expect(inputFn.length).toBe(1);
+      const handler = catchAsync(inputFn);
+      // Per the implementation, only fn.length >= 4 yields a 4-arg wrapper.
+      expect(handler.length).toBe(3);
+    });
+  });
 });

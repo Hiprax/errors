@@ -1,13 +1,26 @@
-import ErrorHandler from "./ErrorHandler";
+import ErrorHandler, { ErrorHandlerOptions } from "./ErrorHandler";
 
-type ErrorFactory = (message?: string) => ErrorHandler;
+/**
+ * Factory function shape produced by every `httpErrors.*` helper. Accepts an
+ * optional message override and an optional ES2022 options bag (currently just
+ * `cause`) for preserving the underlying error in the resulting
+ * {@link ErrorHandler}'s `cause` slot.
+ */
+type ErrorFactory = (
+  message?: string,
+  options?: ErrorHandlerOptions
+) => ErrorHandler;
 
 const createErrorFactory = (
   statusCode: number,
   defaultMessage?: string
 ): ErrorFactory => {
-  return (message?: string) =>
-    new ErrorHandler(message ?? defaultMessage ?? "Error", statusCode);
+  return (message?: string, options?: ErrorHandlerOptions) =>
+    new ErrorHandler(
+      message ?? defaultMessage ?? "Error",
+      statusCode,
+      options
+    );
 };
 
 // Internal factories (not exported individually) to encourage namespaced usage
@@ -46,6 +59,7 @@ const internalServerError: ErrorFactory = createErrorFactory(
   500,
   "Internal server error"
 );
+const notImplemented: ErrorFactory = createErrorFactory(501, "Not implemented");
 const badGateway: ErrorFactory = createErrorFactory(502, "Bad gateway");
 const serviceUnavailable: ErrorFactory = createErrorFactory(
   503,
@@ -67,6 +81,7 @@ export const httpErrors = {
   unprocessableEntity,
   tooManyRequests,
   internalServerError,
+  notImplemented,
   badGateway,
   serviceUnavailable,
   gatewayTimeout,
