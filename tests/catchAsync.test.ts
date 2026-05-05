@@ -945,4 +945,183 @@ describe("catchAsync", () => {
       expect(handler.length).toBe(3);
     });
   });
+
+  describe("Defensive coverage (hostile inputs)", () => {
+    it("ignores a second next() call from the user handler (hasCalledNext guard)", async () => {
+      // Locks in the `if (hasCalledNext) return;` early-return inside the
+      // wrapped next. A buggy handler that calls next twice must not result
+      // in two next() invocations downstream.
+      const handler = catchAsync(
+        (req: Request, res: Response, next: NextFunction) => {
+          next(new Error("first"));
+          next(new Error("second"));
+        }
+      );
+
+      handler(mockReq as Request, mockRes as Response, mockNext);
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe("first");
+    });
+
+    it("skips a child's own method that was already wrapped before decoration", async () => {
+      // Lock in the early-`continue` branch in the own-prototype loop:
+      // when a method on the decorated class is already catchAsync-wrapped,
+      // the decorator must leave it alone rather than wrap it twice.
+      class Controller {}
+      const inner = jest.fn(
+        async (_req: Request, _res: Response, _next: NextFunction) => {
+          throw new Error("pre-wrapped boom");
+        }
+      );
+      const preWrapped = catchAsync(inner);
+      (Controller.prototype as any).preWrapped = preWrapped;
+
+      const Decorated = catchAsync(Controller);
+      // The reference on the prototype is preserved (no re-wrap occurred).
+      expect((Decorated.prototype as any).preWrapped).toBe(preWrapped);
+
+      const instance = new (Decorated as any)();
+      await instance.preWrapped(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+      // Single call to next — the handler ran exactly once, no double dispatch.
+      expect(inner).toHaveBeenCalledTimes(1);
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe(
+        "pre-wrapped boom"
+      );
+    });
+
+    it("does not shadow a parent method when the child overrides it with the same name", async () => {
+      // Locks the `if (targetPrototype.hasOwnProperty(key)) continue;`
+      // branch in the parent-walk loop. Without it, a child override would
+      // be replaced by a wrapped copy of the parent method.
+      class Parent {
+        async shared(_req: Request, _res: Response, _next: NextFunction) {
+          return "parent-shared";
+        }
+      }
+
+      @catchAsync
+      class Child extends Parent {
+        async shared(_req: Request, _res: Response, _next: NextFunction) {
+          return "child-shared";
+        }
+      }
+
+      const child = new Child();
+      const value = await child.shared(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+      expect(value).toBe("child-shared");
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it("reuses a parent-wrapped method by reference when the child is decorated", async () => {
+      // The parent class is NOT decorated, but one of its prototype methods
+      // was wrapped manually (e.g., a router helper applied catchAsync to
+      // it before installing it on the prototype). When the decorator on
+      // the child walks the parent's prototype, the inherited method is
+      // already WRAPPED — the shadow must reuse the same reference rather
+      // than wrap it a second time. Locks the "already wrapped" arm of
+      // `isAlreadyWrapped(originalMethod) ? originalMethod : wrapHandler(...)`.
+      class Parent {}
+      const preWrappedParentMethod = catchAsync(
+        async function work(
+          _req: Request,
+          _res: Response,
+          _next: NextFunction
+        ) {
+          throw new Error("parent pre-wrapped boom");
+        }
+      );
+      (Parent.prototype as any).work = preWrappedParentMethod;
+
+      @catchAsync
+      class Child extends Parent {}
+
+      // Child should now have its own shadowed descriptor for `work`,
+      // pointing at the EXACT same wrapped function (no extra wrap layer).
+      const childOwn = Object.getOwnPropertyDescriptor(
+        Child.prototype,
+        "work"
+      );
+      expect(childOwn).toBeDefined();
+      expect(childOwn!.value).toBe(preWrappedParentMethod);
+
+      const child = new (Child as any)();
+      await child.work(mockReq as Request, mockRes as Response, mockNext);
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe(
+        "parent pre-wrapped boom"
+      );
+    });
+
+    it("skips non-function properties on the parent prototype during the parent walk", async () => {
+      // The parent walk only shadows callable members. Data properties on
+      // the parent prototype (constants, accessors backing fields, etc.)
+      // must NOT be copied onto the child as own properties. Locks the
+      // `!isFunction(descriptor.value)` branch in the parent-walk filter.
+      class Parent {
+        async work(_req: Request, _res: Response, _next: NextFunction) {
+          throw new Error("inherited boom");
+        }
+      }
+      (Parent.prototype as any).version = "1.0";
+      (Parent.prototype as any).config = { debug: true };
+
+      @catchAsync
+      class Child extends Parent {}
+
+      // Function methods are shadowed onto child:
+      expect(
+        Object.getOwnPropertyDescriptor(Child.prototype, "work")
+      ).toBeDefined();
+      // Data properties are NOT shadowed:
+      expect(
+        Object.getOwnPropertyDescriptor(Child.prototype, "version")
+      ).toBeUndefined();
+      expect(
+        Object.getOwnPropertyDescriptor(Child.prototype, "config")
+      ).toBeUndefined();
+
+      // Sanity: the child still sees the inherited data via prototype lookup.
+      const child = new Child() as any;
+      expect(child.version).toBe("1.0");
+      expect(child.config.debug).toBe(true);
+    });
+
+    it("treats a Proxy whose WRAPPED-symbol read throws as not-yet-wrapped", () => {
+      // Triggers the catch in `isAlreadyWrapped` when `value[WRAPPED]` throws.
+      // Without the guard, `catchAsync` would propagate a hostile getter
+      // throw out of the wrapper construction step.
+      const WRAPPED = Symbol.for("@hiprax/errors:catchAsync.wrapped");
+      const inner = function hostile(
+        _req: Request,
+        _res: Response,
+        next: NextFunction
+      ) {
+        next();
+      };
+      const proxy = new Proxy(inner, {
+        get(target, prop, receiver) {
+          if (prop === WRAPPED) {
+            throw new Error("hostile WRAPPED getter");
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      });
+
+      expect(() => catchAsync(proxy as any)).not.toThrow();
+      const wrapped = catchAsync(proxy as any) as any;
+      expect(typeof wrapped).toBe("function");
+      // The wrapper itself behaves normally: invoking it forwards to next.
+      wrapped(mockReq as Request, mockRes as Response, mockNext);
+      expect(mockNext).toHaveBeenCalledTimes(1);
+    });
+  });
 });

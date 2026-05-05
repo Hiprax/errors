@@ -2,9 +2,19 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-05-05
+
 ### Docs
 
 - README now displays the OpenSSF Best Practices badge for project 12757 alongside the existing Scorecard badge. Earning the badge satisfies the Scorecard `CII-Best-Practices` check (`README.md`)
+
+### Internal
+
+- Test coverage hits **100% / 100% / 100% / 100%** (statements / branches / functions / lines) across all source files; new test count is 198 (up from 188). Codecov should now report 100% line coverage where it previously sat at ~89%.
+- New tests cover: `catchAsync` ignoring a duplicate `next()` call from a buggy handler, decorating a class whose method was pre-wrapped (idempotence on individual methods), parent-walk shadow skip when the child overrides a parent method with the same name, parent-walk shadow reusing a pre-wrapped parent method by reference, parent-walk skip for non-function data properties on the parent prototype, and a Proxy whose WRAPPED-symbol read throws (graceful fallback to "not yet wrapped"). New `handleCommonErrors` tests cover Axios responses with missing / empty-string / non-string `statusText`, plus an `AggregateError` whose sub-error throws on every primitive coercion (`String()` failure → empty token filtered out) (`tests/catchAsync.test.ts`, `tests/handleCommonErrors.test.ts`)
+- `httpErrors.createErrorFactory` no longer carries a `?? "Error"` dead-fallback branch — the internal `defaultMessage` parameter is now required, eliminating the unreachable string literal. Public `httpErrors.*` factory shapes and behavior are unchanged (`src/httpErrors.ts`)
+- `errorMiddleware`'s plain-text fallback path now stages the resolved status text in a single `const fallbackText = safeStatusText || "Internal Server Error"` so the istanbul-ignore comment can target the unreachable empty-statusText branch cleanly. No behavior change (`src/errorMiddleware.ts`)
+- Defensive guards that are unreachable through the public API now carry explicit `/* istanbul ignore next|if */` annotations with rationale: `catchAsync` private helpers (`isAlreadyWrapped` null/primitive guards, `isClassConstructor` toString catch, `wrapHandler` non-function input, `wrapControllerClass` non-function and missing-prototype guards, descriptor-existence check after `getOwnPropertyNames`) and `errorMiddleware` (`safeReadString` null-value branch, `createSafeReplacer` exotic-value branches) (`src/catchAsync.ts`, `src/errorMiddleware.ts`)
 
 ## [0.5.2] - 2026-05-05
 
