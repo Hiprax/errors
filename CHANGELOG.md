@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-05-05
+
+### Security
+
+- All GitHub Actions in every workflow are now pinned to immutable commit SHAs with a trailing `# vX.Y.Z` comment (`actions/checkout`, `actions/setup-node`, `actions/upload-artifact`, `codecov/codecov-action`, `github/codeql-action/*`, `ossf/scorecard-action`, `softprops/action-gh-release`). Addresses the Scorecard `Pinned-Dependencies` check and prevents tag-retag supply-chain attacks (`.github/workflows/ci.yml`, `.github/workflows/codeql.yml`, `.github/workflows/release.yml`, `.github/workflows/scorecard.yml`)
+- `release.yml` no longer grants `contents: write` and `id-token: write` at the workflow level; both are scoped to the `publish` job only. Top-level token now defaults to `contents: read`. Addresses Scorecard `Token-Permissions` (`.github/workflows/release.yml`)
+- Every `actions/checkout` step now passes `persist-credentials: false`, so the auth token is dropped from `.git/config` after checkout completes (`.github/workflows/ci.yml`, `.github/workflows/codeql.yml`, `.github/workflows/release.yml`, `.github/workflows/scorecard.yml`)
+- `SECURITY.md` added at repo root with private vulnerability reporting instructions (GitHub private advisory + email), supported-versions matrix, response SLA, and out-of-scope notes. Addresses Scorecard `Security-Policy` (`SECURITY.md`)
+- Added explicit job-level `permissions: contents: read` to the CI test job for least-privilege defense in depth (`.github/workflows/ci.yml`)
+- Scorecard workflow now also runs on `pull_request` so it can be a required status check on protected branches. PR runs skip `publish_results` and the SARIF code-scanning upload — those remain `push` / `schedule` / `branch_protection_rule` only — so the public OpenSSF database and the security tab still reflect main-branch state (`.github/workflows/scorecard.yml`)
+
 ### Internal
 
 - Dependabot configured for npm and `github-actions` ecosystems with weekly schedule and grouped updates so dev-only patch/minor bumps land as a single PR (`.github/dependabot.yml`)
