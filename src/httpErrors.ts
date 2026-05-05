@@ -13,14 +13,10 @@ type ErrorFactory = (
 
 const createErrorFactory = (
   statusCode: number,
-  defaultMessage?: string
+  defaultMessage: string
 ): ErrorFactory => {
   return (message?: string, options?: ErrorHandlerOptions) =>
-    new ErrorHandler(
-      message ?? defaultMessage ?? "Error",
-      statusCode,
-      options
-    );
+    new ErrorHandler(message ?? defaultMessage, statusCode, options);
 };
 
 // Internal factories (not exported individually) to encourage namespaced usage

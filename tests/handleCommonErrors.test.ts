@@ -109,6 +109,38 @@ describe("handleCommonErrors", () => {
     expect(err.statusCode).toBe(502);
   });
 
+  it("propagates upstream status without enrichment when response.statusText is missing", () => {
+    const err = handleCommonErrors({
+      name: "AxiosError",
+      message: "Request failed with status code 410",
+      response: { status: 410 },
+    });
+    expect(err.statusCode).toBe(410);
+    // No "( ... )" suffix because statusText is absent.
+    expect(err.message).toBe("Request failed with status code 410");
+  });
+
+  it("ignores an empty-string response.statusText when enriching the AxiosError message", () => {
+    const err = handleCommonErrors({
+      name: "AxiosError",
+      message: "Request failed with status code 410",
+      response: { status: 410, statusText: "" },
+    });
+    expect(err.statusCode).toBe(410);
+    // Empty statusText is treated as absent — no parenthetical.
+    expect(err.message).toBe("Request failed with status code 410");
+  });
+
+  it("ignores a non-string response.statusText when enriching the AxiosError message", () => {
+    const err = handleCommonErrors({
+      name: "AxiosError",
+      message: "Request failed with status code 410",
+      response: { status: 410, statusText: 410 },
+    });
+    expect(err.statusCode).toBe(410);
+    expect(err.message).toBe("Request failed with status code 410");
+  });
+
   it("includes upstream statusText in the message when available", () => {
     const err = handleCommonErrors({
       name: "AxiosError",
@@ -394,6 +426,32 @@ describe("handleCommonErrors", () => {
       );
       const err = handleCommonErrors(aggregate);
       expect(err.cause).toBe(aggregate);
+    });
+
+    it("falls back to empty string for sub-errors that throw on String coercion", () => {
+      // Sub-error has no `message` property and every primitive-coercion
+      // hook throws. This exercises the catch in the AggregateError mapper
+      // that turns a String() failure into "" so the bad entry drops out
+      // instead of crashing the mapper.
+      const evil: Record<symbol | string, unknown> = {
+        [Symbol.toPrimitive]() {
+          throw new Error("hostile Symbol.toPrimitive");
+        },
+        toString() {
+          throw new Error("hostile toString");
+        },
+        valueOf() {
+          throw new Error("hostile valueOf");
+        },
+      };
+      const aggregate = {
+        name: "AggregateError",
+        errors: [evil, new Error("survivor")],
+      };
+      const err = handleCommonErrors(aggregate);
+      expect(err.statusCode).toBe(500);
+      // Hostile entry collapses to "" and is filtered; only the survivor remains.
+      expect(err.message).toBe("survivor");
     });
   });
 });

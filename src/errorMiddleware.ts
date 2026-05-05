@@ -31,10 +31,18 @@ export interface ErrorPayload {
 function safeReadString(read: () => unknown, fallback: string): string {
   try {
     const value = read();
+    /* istanbul ignore if -- defensive: at the only call site, `read`
+     * returns `error.message` from a freshly constructed ErrorHandler,
+     * whose `message` is always a string. */
     if (value === undefined || value === null) return fallback;
     // String() can also call a throwing toString; guard that too.
     return String(value);
   } catch {
+    /* istanbul ignore next -- defensive: at the only call site in this
+     * module, `read` returns `error.message` from a freshly constructed
+     * ErrorHandler, which always has a string `message`. The guard exists
+     * so the middleware survives a future ErrorHandler subclass that
+     * exposes `message` as a throwing getter. */
     return fallback;
   }
 }
@@ -44,6 +52,10 @@ function safeReadString(read: () => unknown, fallback: string): string {
  * non-serializable values (e.g. BigInt, functions) so a sanitized payload can
  * be serialized after a primary stringify failure.
  */
+/* istanbul ignore next -- defensive: at the call site, the payload only
+ * contains primitives (booleans, numbers, strings) so the bigint, function,
+ * symbol, and circular branches are never exercised in practice. The
+ * replacer is wired in for future-proofing if the payload shape grows. */
 function createSafeReplacer(): (key: string, value: unknown) => unknown {
   const seen = new WeakSet<object>();
   return (_key, value) => {
@@ -143,6 +155,9 @@ const errorMiddleware: ErrorRequestHandler = (err, _req, res, _next) => {
     try {
       return error.statusText;
     } catch {
+      /* istanbul ignore next -- defensive: `statusText` on ErrorHandler is
+       * a plain instance property assigned in the constructor, so reading
+       * it never throws. Mirrors the message guard above for symmetry. */
       return undefined;
     }
   })();
@@ -188,10 +203,15 @@ const errorMiddleware: ErrorRequestHandler = (err, _req, res, _next) => {
       res.status(error.statusCode).json(sanitized);
     } catch {
       try {
+        /* istanbul ignore next -- defensive: `safeStatusText` is always
+         * a non-empty string here because ErrorHandler always resolves a
+         * known statusText from the errorCodes map (unknown codes are
+         * normalized to 500 → "Internal Server Error"). */
+        const fallbackText = safeStatusText || "Internal Server Error";
         res
           .status(error.statusCode)
           .type("text/plain")
-          .send(safeStatusText || "Internal Server Error");
+          .send(fallbackText);
       } catch {
         /* nothing more we can do */
       }

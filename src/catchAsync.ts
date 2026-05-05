@@ -44,7 +44,13 @@ const WRAPPED: symbol = Symbol.for("@hiprax/errors:catchAsync.wrapped");
  * @returns True if the value carries the WRAPPED marker.
  */
 function isAlreadyWrapped(value: unknown): boolean {
+  /* istanbul ignore next -- defensive: every internal call site
+   * (`wrapHandler`, `wrapControllerClass`, public `catchAsync` entry) has
+   * already filtered null/undefined and primitive values before reaching
+   * this helper. */
   if (value == null) return false;
+  /* istanbul ignore next -- defensive: same reason as above; primitives
+   * never reach this helper through the public API. */
   if (typeof value !== "function" && typeof value !== "object") return false;
   try {
     return (value as Record<symbol, unknown>)[WRAPPED] === true;
@@ -95,6 +101,10 @@ function isClassConstructor(fn: Function): boolean {
   try {
     return /^class\s/.test(Function.prototype.toString.call(fn));
   } catch {
+    /* istanbul ignore next -- defensive: Function.prototype.toString.call
+     * uses internal slots and does not throw for any value that passed the
+     * caller's `isFunction` check. Kept for safety against monkey-patched
+     * Function.prototype.toString in exotic realms. */
     return false;
   }
 }
@@ -111,6 +121,8 @@ function isClassConstructor(fn: Function): boolean {
  * @returns The wrapped handler function.
  */
 function wrapHandler<Fn extends AnyRequestHandler>(fn: Fn): Fn {
+  /* istanbul ignore if -- defensive: every public call site (`catchAsync`,
+   * `wrapControllerClass`) checks `isFunction` before calling wrapHandler. */
   if (!isFunction(fn)) {
     return fn;
   }
@@ -212,6 +224,10 @@ function wrapHandler<Fn extends AnyRequestHandler>(fn: Fn): Fn {
   for (const prop of originalProps) {
     if (!skipProps.has(prop)) {
       const descriptor = Object.getOwnPropertyDescriptor(fn, prop);
+      /* istanbul ignore else -- Object.getOwnPropertyDescriptor returns a
+       * descriptor for any key listed by Object.getOwnPropertyNames on a
+       * regular object. The else-branch only fires for exotic Proxy targets
+       * whose `getOwnPropertyDescriptor` trap disagrees with `ownKeys`. */
       if (descriptor) {
         try {
           Object.defineProperty(wrapped, prop, {
@@ -249,12 +265,15 @@ function wrapHandler<Fn extends AnyRequestHandler>(fn: Fn): Fn {
 function wrapControllerClass<T extends new (...args: any[]) => any>(
   constructor: T
 ): T {
-  // Check if target is actually a function (a class constructor is a function)
+  /* istanbul ignore if -- defensive: only reached via the public `catchAsync`
+   * after `isClassConstructor` returned true, which implies `isFunction`. */
   if (!isFunction(constructor)) {
     return constructor;
   }
 
-  // Check if it has a prototype (typical for classes/constructors)
+  /* istanbul ignore if -- defensive: ES class constructors always have a
+   * prototype object. Guard preserves safety if a future refactor allows
+   * non-class callables through. */
   if (!constructor.prototype) {
     return constructor;
   }
