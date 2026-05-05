@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Docs
+
+- README now displays the OpenSSF Best Practices badge for project 12757 alongside the existing Scorecard badge. Earning the badge satisfies the Scorecard `CII-Best-Practices` check (`README.md`)
+
 ## [0.5.2] - 2026-05-05
 
 ### Security
