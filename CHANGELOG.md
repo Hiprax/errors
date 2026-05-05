@@ -11,6 +11,7 @@
 - Every `actions/checkout` step now passes `persist-credentials: false`, so the auth token is dropped from `.git/config` after checkout completes (`.github/workflows/ci.yml`, `.github/workflows/codeql.yml`, `.github/workflows/release.yml`, `.github/workflows/scorecard.yml`)
 - `SECURITY.md` added at repo root with private vulnerability reporting instructions (GitHub private advisory + email), supported-versions matrix, response SLA, and out-of-scope notes. Addresses Scorecard `Security-Policy` (`SECURITY.md`)
 - Added explicit job-level `permissions: contents: read` to the CI test job for least-privilege defense in depth (`.github/workflows/ci.yml`)
+- Scorecard workflow now also runs on `pull_request` so it can be a required status check on protected branches. PR runs skip `publish_results` and the SARIF code-scanning upload — those remain `push` / `schedule` / `branch_protection_rule` only — so the public OpenSSF database and the security tab still reflect main-branch state (`.github/workflows/scorecard.yml`)
 
 ### Internal
 
