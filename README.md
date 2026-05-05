@@ -349,6 +349,10 @@ Runs the Jest test suite covering all modules.
 
 Issues and PRs are welcome. Please include tests and keep the API surface small and focused.
 
+## Security
+
+Security vulnerabilities should be reported privately via [GitHub private advisories](https://github.com/Hiprax/errors/security/advisories/new) or by email — see [`SECURITY.md`](./SECURITY.md) for the full policy, supported versions, and response timeline. Please do not open public GitHub issues for security problems.
+
 ## License
 
 MIT &copy; Hiprax
