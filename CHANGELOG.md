@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-05-12
+
+### Added
+
+- Tag protection ruleset (`release-tags`) on the repository. Any tag matching `refs/tags/v*.*.*` now blocks deletion, force-push (`non_fast_forward`), and tag-update operations, so a published release tag cannot be silently rewritten to point at a different commit. Configured via the GitHub API; the canonical definition lives at `.github/rulesets/tags.json` for review and re-apply (`.github/rulesets/tags.json`)
+- README now displays two additional badges alongside the existing CI / Codecov / CodeQL set: a Libraries.io dependency status badge for `@hiprax/errors` and an npm-provenance badge linking to npm's provenance docs (the release workflow already publishes with `--provenance`) (`README.md`)
+
+### Changed
+
+- Repository settings: `delete_branch_on_merge` and `allow_update_branch` are now enabled at the repo level. Merged PR branches are auto-deleted from the remote, and contributors can update a PR branch from the GitHub UI without dropping to the CLI when `main` has moved ahead
+
+### Docs
+
+- `CLAUDE.md` "CI / Workflow Conventions" section now documents the tag-protection ruleset alongside the existing branch-protection guidance, so a future contributor can re-create the ruleset from the checked-in `.github/rulesets/tags.json` without reverse-engineering the GitHub UI (`CLAUDE.md`)
+
 ## [0.5.4] - 2026-05-12
 
 ### Removed
