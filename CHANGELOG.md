@@ -2,7 +2,19 @@
 
 ## [Unreleased]
 
-## [0.5.3] - 2026-05-05
+## [0.5.4] - 2026-05-12
+
+### Removed
+
+- Dependabot is fully removed from the repository. The `.github/dependabot.yml` configuration is deleted, all open Dependabot PRs are closed, and Dependabot vulnerability alerts / automated security updates are disabled at the repo level. Action and dependency bumps will be done manually going forward (`.github/dependabot.yml`)
+- OpenSSF Scorecard supply-chain analysis workflow removed (`.github/workflows/scorecard.yml`)
+- OpenSSF Scorecard and OpenSSF Best Practices badges removed from the README (`README.md`)
+
+### Docs
+
+- `CLAUDE.md` rewritten to drop OpenSSF Scorecard references in the CI conventions, security reporting, and branch protection sections. Manual SHA-pin and least-privilege workflow practices remain as they're still sound supply-chain hygiene independent of the OpenSSF program (`CLAUDE.md`)
+
+
 
 ### Docs
 

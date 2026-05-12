@@ -5,8 +5,6 @@
 [![CI](https://github.com/Hiprax/errors/actions/workflows/ci.yml/badge.svg)](https://github.com/Hiprax/errors/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Hiprax/errors/branch/main/graph/badge.svg)](https://codecov.io/gh/Hiprax/errors)
 [![CodeQL](https://github.com/Hiprax/errors/actions/workflows/codeql.yml/badge.svg)](https://github.com/Hiprax/errors/actions/workflows/codeql.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Hiprax/errors/badge)](https://scorecard.dev/viewer/?uri=github.com/Hiprax/errors)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12757/badge)](https://www.bestpractices.dev/projects/12757)
 
 A small, typed error toolkit for Express.js apps. Zero runtime dependencies.
 
