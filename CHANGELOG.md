@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-05-12
+
+### Removed
+
+- Libraries.io dependency-status badge removed from the README. The package has zero runtime dependencies, so the badge surfaced devDependency churn that wasn't relevant to consumers (`README.md`)
+
 ## [0.5.5] - 2026-05-12
 
 ### Added

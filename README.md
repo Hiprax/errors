@@ -5,7 +5,6 @@
 [![CI](https://github.com/Hiprax/errors/actions/workflows/ci.yml/badge.svg)](https://github.com/Hiprax/errors/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Hiprax/errors/branch/main/graph/badge.svg)](https://codecov.io/gh/Hiprax/errors)
 [![CodeQL](https://github.com/Hiprax/errors/actions/workflows/codeql.yml/badge.svg)](https://github.com/Hiprax/errors/actions/workflows/codeql.yml)
-[![Dependencies](https://img.shields.io/librariesio/release/npm/@hiprax/errors)](https://libraries.io/npm/@hiprax%2Ferrors)
 [![npm provenance](https://img.shields.io/badge/npm-provenance-blue?logo=npm&logoColor=white)](https://docs.npmjs.com/generating-provenance-statements)
 
 A small, typed error toolkit for Express.js apps. Zero runtime dependencies.
