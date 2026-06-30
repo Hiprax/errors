@@ -5,10 +5,29 @@
 ### Fixed
 
 - `catchAsync` now detects name-stripped / whitespace-free anonymous class expressions (e.g. the form a minifier emits, `class{...}`), so wrapping such a controller class via `catchAsync(Class)` correctly wraps its prototype methods instead of mis-routing the constructor through the function wrapper; the class-constructor detection regex was broadened from `/^class\s/` to `/^class[\s{]/` (`src/catchAsync.ts`).
+- `catchAsync` async `.catch()` callback now wraps the `wrappedNext(errorToPass)` call in a `try/catch`, preventing an unhandled promise rejection under Express 4 if the supplied `next` throws synchronously. The sync error path already had an equivalent outer guard; this closes the asymmetry on the async path (`src/catchAsync.ts`).
+- `errorCodes` map is now frozen via `Object.freeze(internalErrorCodes)`, applied after the `set`/`delete`/`clear` mutation-rejecting overrides. `Object.isFrozen(errorCodes)` now returns `true`; reads, iteration, and the throwing mutation methods are unaffected (`src/errorCodes.ts`).
+- `handleCommonErrors` `CastError` branch now guards the `err.path` string coercion in a `try/catch`; a hostile `toString()` or `[Symbol.toPrimitive]` can no longer escape into `errorMiddleware`'s outer catch and downgrade the intended 400 response to a generic 500 (`src/handleCommonErrors.ts`).
 
 ### Tests
 
 - Pinned that a no-space anonymous class routes to the class wrapper (`tests/catchAsync.test.ts`), and that the `exposeServerErrors: false` 5xx redaction reads the **switch-final** status by redacting a switch-derived `ECONNREFUSED → 502` to `"Bad Gateway"` in production (`tests/errorMiddleware.test.ts`).
+- Added async-`next`-throws test: an async handler that rejects while the supplied `next` throws synchronously resolves to `undefined` (no unhandled rejection) and calls `next` exactly once, verifying the async `.catch()` guard (`tests/catchAsync.test.ts`).
+- Added `Object.isFrozen`, intact-read, and arbitrary-own-property assertions for the `errorCodes` export (`tests/errorCodes.test.ts`).
+- Added `CastError` hostile-`path` tests: a `CastError` whose `path.toString()` throws returns `statusCode === 400` (not 500) with a stable message; a cross-file assertion confirms the same hostile input through `errorMiddleware` yields 400, not a downgraded 500 (`tests/handleCommonErrors.test.ts`).
+- Renamed misleading test title at `tests/catchAsync.test.ts:964`: now accurately describes the arity-3 behavior for an `(err, ...rest)` handler whose declared length is 1, replacing the previous title that incorrectly said "arity 4" (`tests/catchAsync.test.ts`).
+- Extended `packageExports.test.ts` to assert `exports["."].default`, `main`, `module`, and `types` alongside the existing `import`/`require` condition assertions, so a silent change to any of these fields cannot pass all tests undetected (`tests/packageExports.test.ts`).
+
+### Docs
+
+- Corrected `handleCommonErrors` AxiosError fallback row in `README.md`: previously implied the message was `"Bad gateway"`; the fallback is status 502 with message `"Error communicating with an external service"` (`README.md`).
+- Corrected `errorCodes` type description in `README.md` from `` `Map<number, string>` `` to `` `ReadonlyMap<number, string>` `` (`README.md`).
+- Corrected reference documentation inaccuracies in the `errorMiddleware` pipeline description and Implementation Details: `statusText` and `stack` are not read through `safeReadString` (only `message` is); each uses its own inline `try/catch` guard. The `CastError` `err.path` description now reflects the guarded coercion.
+- Restored the missing `## [0.5.3] - 2026-05-05` heading in `CHANGELOG.md`. Its `### Docs` and `### Internal` entries had been orphaned under `[0.5.4]` as a duplicate `### Docs` subsection (with surplus blank lines), which contradicted `[0.5.4]`'s badge-removal note; they are now under their own correctly dated release section (`CHANGELOG.md`)
+
+### Internal
+
+- Added `*.tmp` to `.gitignore` (under `# Temporary files`) and removed a stray editor backup file that had been accidentally committed (`.gitignore`).
 
 ## [0.6.0] - 2026-06-30
 
@@ -62,7 +81,7 @@
 
 - `CLAUDE.md` rewritten to drop OpenSSF Scorecard references in the CI conventions, security reporting, and branch protection sections. Manual SHA-pin and least-privilege workflow practices remain as they're still sound supply-chain hygiene independent of the OpenSSF program (`CLAUDE.md`)
 
-
+## [0.5.3] - 2026-05-05
 
 ### Docs
 

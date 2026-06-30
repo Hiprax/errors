@@ -170,7 +170,13 @@ function wrapHandler<Fn extends AnyRequestHandler>(fn: Fn): Fn {
                 err instanceof Error
                   ? err
                   : new Error(`Non-Error thrown/rejected: ${String(err)}`);
-              wrappedNext(errorToPass);
+              try {
+                wrappedNext(errorToPass);
+              } catch {
+                // Contain a synchronously-throwing next() so it cannot become
+                // an unhandled rejection (Express 4 does not await middleware returns);
+                // mirrors the sync path.
+              }
             }
             return undefined;
           });

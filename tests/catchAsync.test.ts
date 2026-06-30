@@ -961,7 +961,7 @@ describe("catchAsync", () => {
       expect(handler.length).toBe(3);
     });
 
-    it("preserves arity 4 for a handler with a leading positional then rest (declared length 1)", () => {
+    it("normalizes arity to 3 for an (err, ...rest) handler whose declared length is 1 (not treated as an error handler)", () => {
       // (err, ...rest) reports length === 1, but it is *not* a length>=4 case,
       // so the wrapper falls into the 3-arg branch. This test documents that
       // exact behavior so anyone widening arity detection knows the contract.
@@ -1151,6 +1151,28 @@ describe("catchAsync", () => {
       // The wrapper itself behaves normally: invoking it forwards to next.
       wrapped(mockReq as Request, mockRes as Response, mockNext);
       expect(mockNext).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not produce an unhandled rejection when async handler rejects and next throws synchronously", async () => {
+      // Guards the try/catch around wrappedNext() in the async .catch() callback.
+      // Without the guard, a synchronously-throwing next() would escape the
+      // callback and turn the returned promise into a rejected promise. Under
+      // Express 4 (which discards middleware return values and never awaits them)
+      // that rejection is unobserved and process-fatal on Node 15+.
+      const throwingNext: jest.Mock = jest.fn().mockImplementation(() => {
+        throw new Error("next threw synchronously");
+      });
+
+      const handler = catchAsync(
+        async (_req: Request, _res: Response, _next: NextFunction) => {
+          throw new Error("handler rejection");
+        }
+      );
+
+      await expect(
+        handler(mockReq as Request, mockRes as Response, throwingNext as unknown as NextFunction)
+      ).resolves.toBeUndefined();
+      expect(throwingNext).toHaveBeenCalledTimes(1);
     });
   });
 });

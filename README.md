@@ -167,7 +167,7 @@ Maps common library/framework errors to `ErrorHandler` instances by `err.name`:
 | `JsonWebTokenError`  | 401                     | Fixed JWT invalid/expired message                                                                                  |
 | `TokenExpiredError`  | 401                     | Fixed JWT invalid/expired message                                                                                  |
 | `NotBeforeError`     | 401                     | JWT used before its `nbf` ("not before") timestamp; same message as the other JWT cases                            |
-| `AxiosError`         | upstream status, else 502 | When `err.response.status` is a known HTTP error code, that status passes through (e.g. upstream 404 → 404). Otherwise falls back to 502 "Bad gateway". |
+| `AxiosError`         | upstream status, else 502 | When `err.response.status` is a known HTTP error code, that status passes through (e.g. upstream 404 → 404). Otherwise falls back to status 502 with message "Error communicating with an external service". |
 | `SyntaxError`        | 400                     | Malformed JSON or invalid syntax                                                                                   |
 | `AggregateError`     | 500                     | Joins `err.errors[*].message` with `; `; original `AggregateError` attached as `cause` for full chain traversal     |
 | `ZodError`           | 400                     | Joins `err.issues[*].message` (Zod)                                                                                |
@@ -307,7 +307,7 @@ throw httpErrors.conflict("Email taken", { cause: dbErr }); // 409, cause preser
 import { errorCodes } from "@hiprax/errors";
 ```
 
-A `Map<number, string>` of all standard HTTP 4xx/5xx status codes and their text descriptions. Used internally by `ErrorHandler` to validate codes and resolve `statusText`. Exported for advanced use cases (e.g., custom middleware or logging).
+A `ReadonlyMap<number, string>` of all standard HTTP 4xx/5xx status codes and their text descriptions. `.set`, `.delete`, and `.clear` throw `TypeError` — the map is sealed against mutation. Used internally by `ErrorHandler` to validate codes and resolve `statusText`. Exported for advanced use cases (e.g., custom middleware or logging).
 
 ```ts
 errorCodes.get(404); // "Not Found"

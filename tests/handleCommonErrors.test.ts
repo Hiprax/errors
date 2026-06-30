@@ -541,4 +541,72 @@ describe("handleCommonErrors", () => {
       expect(mockRes.body.message).toBe("Validation error");
     });
   });
+
+  describe("CastError hostile path guard (Phase 3 Task 3.2)", () => {
+    it("returns 400 (not 500) when err.path coercion throws", () => {
+      // Before the guard, a throwing toString()/[Symbol.toPrimitive] on err.path
+      // would escape handleCommonErrors entirely; errorMiddleware's outer catch
+      // would then produce a 500. After the guard the mapper always returns 400.
+      const hostile = {
+        name: "CastError",
+        path: {
+          toString() {
+            throw new Error("hostile toString");
+          },
+          [Symbol.toPrimitive]() {
+            throw new Error("hostile toPrimitive");
+          },
+        },
+      };
+      const err = handleCommonErrors(hostile as any);
+      expect(err.statusCode).toBe(400);
+      expect(err.message).toContain("unknown");
+    });
+
+    it("preserves the original error as cause even for the hostile path", () => {
+      const hostile = {
+        name: "CastError",
+        path: {
+          toString() {
+            throw new Error("hostile toString");
+          },
+        },
+      };
+      const err = handleCommonErrors(hostile as any);
+      expect(err.cause).toBe(hostile);
+    });
+
+    it("cross-file: hostile CastError through errorMiddleware yields 400, not 500", () => {
+      // Mirror of the ValidationError cross-file test (Task 1.3). Confirms the
+      // whole call path: errorMiddleware -> handleCommonErrors (CastError branch
+      // with throwing path) -> returns ErrorHandler(400) -> res.status(400).
+      const mockRes: any = {
+        headersSent: false,
+        code: undefined,
+        body: undefined,
+        status(code: number) {
+          this.code = code;
+          return this;
+        },
+        json(payload: any) {
+          this.body = payload;
+          return this;
+        },
+      };
+      const hostile = {
+        name: "CastError",
+        path: {
+          toString() {
+            throw new Error("hostile toString");
+          },
+          [Symbol.toPrimitive]() {
+            throw new Error("hostile toPrimitive");
+          },
+        },
+      };
+      errorMiddleware(hostile as any, {} as any, mockRes, (() => {}) as any);
+      expect(mockRes.code).toBe(400);
+      expect(mockRes.body.success).toBe(false);
+    });
+  });
 });
