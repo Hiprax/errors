@@ -23,6 +23,7 @@
 - Corrected `handleCommonErrors` AxiosError fallback row in `README.md`: previously implied the message was `"Bad gateway"`; the fallback is status 502 with message `"Error communicating with an external service"` (`README.md`).
 - Corrected `errorCodes` type description in `README.md` from `` `Map<number, string>` `` to `` `ReadonlyMap<number, string>` `` (`README.md`).
 - Corrected reference documentation inaccuracies in the `errorMiddleware` pipeline description and Implementation Details: `statusText` and `stack` are not read through `safeReadString` (only `message` is); each uses its own inline `try/catch` guard. The `CastError` `err.path` description now reflects the guarded coercion.
+- Restored the missing `## [0.5.3] - 2026-05-05` heading in `CHANGELOG.md`. Its `### Docs` and `### Internal` entries had been orphaned under `[0.5.4]` as a duplicate `### Docs` subsection (with surplus blank lines), which contradicted `[0.5.4]`'s badge-removal note; they are now under their own correctly dated release section (`CHANGELOG.md`)
 
 ### Internal
 
@@ -80,7 +81,7 @@
 
 - `CLAUDE.md` rewritten to drop OpenSSF Scorecard references in the CI conventions, security reporting, and branch protection sections. Manual SHA-pin and least-privilege workflow practices remain as they're still sound supply-chain hygiene independent of the OpenSSF program (`CLAUDE.md`)
 
-
+## [0.5.3] - 2026-05-05
 
 ### Docs
 
