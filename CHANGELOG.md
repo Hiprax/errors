@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `catchAsync` now detects name-stripped / whitespace-free anonymous class expressions (e.g. the form a minifier emits, `class{...}`), so wrapping such a controller class via `catchAsync(Class)` correctly wraps its prototype methods instead of mis-routing the constructor through the function wrapper; the class-constructor detection regex was broadened from `/^class\s/` to `/^class[\s{]/` (`src/catchAsync.ts`).
+
+### Tests
+
+- Pinned that a no-space anonymous class routes to the class wrapper (`tests/catchAsync.test.ts`), and that the `exposeServerErrors: false` 5xx redaction reads the **switch-final** status by redacting a switch-derived `ECONNREFUSED → 502` to `"Bad Gateway"` in production (`tests/errorMiddleware.test.ts`).
+
 ## [0.6.0] - 2026-06-30
 
 ### Added
