@@ -98,6 +98,14 @@ Object.defineProperties(internalErrorCodes, {
   },
 });
 
+// Freeze after the mutation-rejecting overrides are in place so that:
+// (a) Object.isFrozen(errorCodes) returns true, matching the JSDoc claim;
+// (b) arbitrary own-property injection (e.g. errorCodes.foo = …) is rejected
+//     in strict mode, closing the one mutation vector the per-method overrides
+//     alone cannot cover. Map internal-slot reads (get/has/size/iteration) are
+//     unaffected by freeze.
+Object.freeze(internalErrorCodes);
+
 const errorCodes: ReadonlyMap<number, string> = internalErrorCodes;
 
 export default errorCodes;

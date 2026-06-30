@@ -88,4 +88,28 @@ describe("errorCodes map", () => {
       expect(ro.get(404)).toBe("Not Found");
     });
   });
+
+  describe("Object.freeze hardening (Phase 3 Task 3.1)", () => {
+    it("is frozen (Object.isFrozen returns true)", () => {
+      expect(Object.isFrozen(errorCodes)).toBe(true);
+    });
+
+    it("read operations remain intact after freeze: .get, .has, .size, iteration", () => {
+      expect(errorCodes.get(404)).toBe("Not Found");
+      expect(errorCodes.has(500)).toBe(true);
+      expect(errorCodes.size).toBeGreaterThan(0);
+      const entries = Array.from(errorCodes.entries());
+      expect(entries.length).toBe(errorCodes.size);
+    });
+
+    it("adding an arbitrary own property is rejected in strict-mode context", () => {
+      // Object.freeze makes the map non-extensible; assigning a new own property
+      // in strict mode (which TypeScript CJS output always enables via "use strict")
+      // throws TypeError. This closes the own-property injection vector that the
+      // per-method set/delete/clear overrides alone cannot cover.
+      expect(() => {
+        (errorCodes as any).arbitraryProp = "injected";
+      }).toThrow(TypeError);
+    });
+  });
 });

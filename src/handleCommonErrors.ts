@@ -15,12 +15,23 @@ export const handleCommonErrors = (err: any): ErrorHandler => {
   }
 
   switch (err.name) {
-    case "CastError":
+    case "CastError": {
+      // Guard the coercion: err.path may be a hostile object whose toString()
+      // or [Symbol.toPrimitive] throws. Without the guard, the exception would
+      // escape handleCommonErrors and be caught by errorMiddleware's outer
+      // try/catch, which downgrades the intended 400 to a generic 500.
+      let pathStr: string;
+      try {
+        pathStr = String(err.path);
+      } catch {
+        pathStr = "unknown";
+      }
       return new ErrorHandler(
-        `Resource not found. Invalid ${err.path}`,
+        `Resource not found. Invalid ${pathStr}`,
         400,
         { cause: err }
       );
+    }
     case "ValidationError": {
       const message = Object.values(err.errors || {})
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Mongoose ValidationError sub-error shapes vary.
