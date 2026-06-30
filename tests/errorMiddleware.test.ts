@@ -553,6 +553,29 @@ describe("errorMiddleware", () => {
           process.env.NODE_ENV = originalEnv;
         }
       });
+
+      it("redacts a switch-derived 5xx (ECONNREFUSED → 502) to the generic status text in production", () => {
+        // Unlike the other redaction tests, the 502 here is assigned INSIDE the
+        // middleware by the err.code switch, not pre-built on the ErrorHandler. This
+        // pins that redaction reads the SWITCH-FINAL statusCode — a refactor that
+        // moved the redaction above the switch would leak the pre-switch message and
+        // fail this test.
+        const originalEnv = process.env.NODE_ENV;
+        process.env.NODE_ENV = "production";
+        try {
+          const mw = createErrorMiddleware({ exposeServerErrors: false });
+          const res = createRes();
+          const err = { code: "ECONNREFUSED" } as any;
+          mw(err, req, res, next);
+          expect((res as any).code).toBe(502);
+          // "Bad Gateway" is the 502 status text — the input carried no message of
+          // its own, so this proves redaction ran on the switch-derived 502 object.
+          expect((res as any).body.message).toBe("Bad Gateway");
+          expect((res as any).body.statusText).toBe("Bad Gateway");
+        } finally {
+          process.env.NODE_ENV = originalEnv;
+        }
+      });
     });
   });
 });
