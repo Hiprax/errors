@@ -7,8 +7,8 @@
 
 export { default as ErrorHandler } from "./ErrorHandler";
 export type { ErrorHandlerOptions } from "./ErrorHandler";
-export { default as errorMiddleware } from "./errorMiddleware";
-export type { ErrorPayload } from "./errorMiddleware";
+export { default as errorMiddleware, createErrorMiddleware } from "./errorMiddleware";
+export type { ErrorPayload, ErrorMiddlewareOptions } from "./errorMiddleware";
 export { default as errorCodes } from "./errorCodes";
 export { catchAsync } from "./catchAsync";
 export { handleCommonErrors } from "./handleCommonErrors";

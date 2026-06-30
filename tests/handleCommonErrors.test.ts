@@ -1,4 +1,4 @@
-import { handleCommonErrors } from "../src";
+import { handleCommonErrors, errorMiddleware } from "../src";
 
 describe("handleCommonErrors", () => {
   it("maps CastError to 400 with path", () => {
@@ -452,6 +452,93 @@ describe("handleCommonErrors", () => {
       expect(err.statusCode).toBe(500);
       // Hostile entry collapses to "" and is filtered; only the survivor remains.
       expect(err.message).toBe("survivor");
+    });
+  });
+
+  describe("ValidationError null/non-object sub-entries (Task 1.1 hardening)", () => {
+    it("ignores null sub-entries and keeps valid messages", () => {
+      const err = handleCommonErrors({
+        name: "ValidationError",
+        errors: { a: { message: "A" }, b: null },
+      });
+      expect(err.statusCode).toBe(400);
+      expect(err.message).toBe("A");
+    });
+
+    it("falls back to 'Validation error' when all sub-entries are null", () => {
+      const err = handleCommonErrors({
+        name: "ValidationError",
+        errors: { a: null },
+      });
+      expect(err.statusCode).toBe(400);
+      expect(err.message).toBe("Validation error");
+    });
+
+    it("handles array-shaped errors with null elements via Object.values", () => {
+      // errors is passed as an array ([null]); Object.values([null]) yields
+      // [null] and the per-element guard prevents a TypeError.
+      const err = handleCommonErrors({
+        name: "ValidationError",
+        errors: [null],
+      });
+      expect(err.statusCode).toBe(400);
+      expect(err.message).toBe("Validation error");
+    });
+  });
+
+  describe("ZodError null/non-array issues (Task 1.2 hardening)", () => {
+    it("ignores null issue entries and falls back to 'Validation error'", () => {
+      const err = handleCommonErrors({
+        name: "ZodError",
+        issues: [null],
+      });
+      expect(err.statusCode).toBe(400);
+      expect(err.message).toBe("Validation error");
+    });
+
+    it("keeps valid messages and ignores null issue entries", () => {
+      const err = handleCommonErrors({
+        name: "ZodError",
+        issues: [{ message: "Required" }, null],
+      });
+      expect(err.statusCode).toBe(400);
+      expect(err.message).toBe("Required");
+    });
+
+    it("handles non-array issues without throwing", () => {
+      // Previously (err.issues || []).map(...) would throw because a truthy
+      // non-array value has no .map(). The Array.isArray guard fixes this.
+      const err = handleCommonErrors({
+        name: "ZodError",
+        issues: "not-an-array",
+      });
+      expect(err.statusCode).toBe(400);
+      expect(err.message).toBe("Validation error");
+    });
+  });
+
+  describe("ValidationError null sub-entry through errorMiddleware (Task 1.3 cross-file)", () => {
+    it("produces 400 not 500 when ValidationError has a null sub-entry", () => {
+      // Before the guard, handleCommonErrors threw TypeError on a null sub-entry;
+      // errorMiddleware's try/catch caught it and downgraded the status to 500.
+      // After the guard, the same input produces the correct 400.
+      const mockRes: any = {
+        headersSent: false,
+        code: undefined,
+        body: undefined,
+        status(code: number) {
+          this.code = code;
+          return this;
+        },
+        json(payload: any) {
+          this.body = payload;
+          return this;
+        },
+      };
+      const errObj = { name: "ValidationError", errors: { a: null } };
+      errorMiddleware(errObj as any, {} as any, mockRes, (() => {}) as any);
+      expect(mockRes.code).toBe(400);
+      expect(mockRes.body.message).toBe("Validation error");
     });
   });
 });

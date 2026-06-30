@@ -24,11 +24,14 @@ export const handleCommonErrors = (err: any): ErrorHandler => {
     case "ValidationError": {
       const message = Object.values(err.errors || {})
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Mongoose ValidationError sub-error shapes vary.
-        .map((value: any) => value.message)
+        .map((value: any) =>
+          value && typeof value === "object" && typeof value.message === "string"
+            ? value.message
+            : ""
+        )
+        .filter((m: string) => m.length > 0)
         .join(", ");
-      return new ErrorHandler(message || "Validation error", 400, {
-        cause: err,
-      });
+      return new ErrorHandler(message || "Validation error", 400, { cause: err });
     }
     case "JsonWebTokenError":
     case "TokenExpiredError":
@@ -106,8 +109,15 @@ export const handleCommonErrors = (err: any): ErrorHandler => {
       return new ErrorHandler(message, 500, { cause: err });
     }
     case "ZodError": {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Zod's issue type is not pulled in as a dependency; use any for the issue shape.
-      const message = (err.issues || []).map((i: any) => i.message).join(", ");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Zod's issue type is not a dependency.
+      const issues: any[] = Array.isArray(err.issues) ? err.issues : [];
+      const message = issues
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- issue shapes vary.
+        .map((i: any) =>
+          i && typeof i === "object" && typeof i.message === "string" ? i.message : ""
+        )
+        .filter((m: string) => m.length > 0)
+        .join(", ");
       return new ErrorHandler(message || "Validation error", 400, {
         cause: err,
       });
