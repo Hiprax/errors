@@ -271,6 +271,35 @@ describe("catchAsync", () => {
       );
       expect(mockNext).toHaveBeenCalledWith(expect.any(Error));
     });
+
+    it("routes a name-stripped / whitespace-free anonymous class to the class wrapper (minified-controller case)", async () => {
+      // `eval` is the only way to produce source that serializes WITHOUT the
+      // space after `class` (a formatter would always insert it). This mirrors
+      // what terser `-c -m` emits for an anonymous controller class expression.
+      const NoSpaceController = eval(
+        "(class{ async handle(req, res, next) { throw new Error('boom'); } })"
+      ) as new () => {
+        handle: (req: Request, res: Response, next: NextFunction) => Promise<unknown>;
+      };
+      expect(Function.prototype.toString.call(NoSpaceController).startsWith("class{")).toBe(true);
+
+      const Wrapped = catchAsync(NoSpaceController);
+      const instance = new Wrapped();
+
+      // (a) The method survived: it was wrapped on the prototype (class branch),
+      //     not stripped by being mis-routed to wrapHandler.
+      expect(typeof instance.handle).toBe("function");
+
+      // (b) The wrapped method forwards the thrown error to next() exactly once,
+      //     and does NOT throw "Class constructors cannot be invoked without 'new'".
+      await instance.handle(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext
+      );
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      expect((mockNext.mock.calls[0][0] as Error).message).toBe("boom");
+    });
   });
 
   describe("Error handling", () => {

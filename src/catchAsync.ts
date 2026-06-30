@@ -94,12 +94,16 @@ function isFunction(fn: unknown): fn is Function {
  * This is the reliable ES2022+ way to detect class constructors, since duck-typing
  * (checking for .prototype) is true for ALL regular (non-arrow) functions.
  *
+ * The pattern `/^class[\s{]/` matches both the spaced form (`class Foo {`, `class {`)
+ * and the name-stripped/whitespace-free anonymous form (`class{`) that minifiers such
+ * as terser emit for controller class expressions.
+ *
  * @param fn The function to check.
  * @returns True if the function is a class constructor, false otherwise.
  */
 function isClassConstructor(fn: Function): boolean {
   try {
-    return /^class\s/.test(Function.prototype.toString.call(fn));
+    return /^class[\s{]/.test(Function.prototype.toString.call(fn));
   } catch {
     /* istanbul ignore next -- defensive: Function.prototype.toString.call
      * uses internal slots and does not throw for any value that passed the

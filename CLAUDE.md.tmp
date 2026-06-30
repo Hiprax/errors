@@ -1,0 +1,277 @@
+# CLAUDE.md - @hiprax/errors Project Refrence
+
+## Mandatory: Keeping Documentation Updated
+
+At the end of every edit session, Claude must update:
+
+1. **`CHANGELOG.md`** (always) — Append dated entry for what was added/changed/fixed with file paths.
+2. **`CLAUDE.md`** (when relevant) — Update for new patterns, components, data fields, conventions, or architecture.
+3. **`README.md`** (when relevant) — Update for user-facing feature, stack, structure, or setup changes.
+
+Important: Mention nothing about CLAUDE or anything related to the project being edited/improved by an AI.
+
+---
+
+## Version Bumping & Release Flow
+
+After each successful edit session where code changes are made and tests pass, bump the version. Use semantic versioning:
+
+- **patch** (e.g., 0.9.1 → 0.9.2): Bug fixes, minor tweaks, documentation-only changes
+- **minor** (e.g., 0.9.2 → 0.10.0): New features, new utility functions, new methods added
+- **major** (e.g., 0.10.0 → 1.0.0): Breaking API changes, removed/renamed exports, changed data formats
+
+**Order of operations matters.** `release.yml` triggers on `v*.*.*` tag push and extracts release notes from the matching `## [X.Y.Z]` CHANGELOG heading — so the heading must already exist before the tag is pushed, or the GitHub Release body falls back to a generic link.
+
+1. Append a new `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` with the changes (or promote `## [Unreleased]` and add a fresh empty `[Unreleased]` above).
+2. Update `CLAUDE.md` / `README.md` if relevant.
+3. Stage docs (`git add CHANGELOG.md CLAUDE.md README.md`), then run `npm version patch|minor|major` — this updates `package.json` + `package-lock.json`, creates the bump commit (picking up the staged docs), and creates an annotated `vX.Y.Z` tag pointing at that commit.
+4. Push the commit: `git push origin main` (or open a PR if branch protection requires it; the bump must land on `main` before the tag is pushed).
+5. Push the tag: `git push origin vX.Y.Z` — this triggers `release.yml`, which re-runs the gates, verifies tag↔package.json version agreement, publishes to npm with provenance, and creates the GitHub Release from the matching CHANGELOG section.
+
+**Confirm the bump (patch/minor/major) with the user before running `npm version`.** Tag push is the irreversible step that publishes to npm — confirm again before `git push origin vX.Y.Z`. See the global "push everything to GitHub" flow in `~/.claude/CLAUDE.md` for the full release ritual.
+
+---
+
+## Add/Modify Test files
+
+After each successful edit session where code changes are made, New tests should be added/modified.
+
+---
+
+## Pre-Completion Checklist
+
+Before finishing any edit session, always run the following and ensure they all pass:
+
+1. `npm run build` — Verify the project compiles without errors
+2. `npm test` — Verify all tests pass
+3. `npm run lint` — Verify no lint errors
+4. `npm run type-check` — Verify no type errors
+5. `npm run check-types-pack` — Verify the published bundle's types resolve cleanly in all four resolution modes (`attw --pack .`). CI gates the same check on every push and PR, so failing it locally guarantees a red CI run.
+
+Do not consider an edit session complete until all five checks pass. If any fail, fix the issues before wrapping up.
+
+---
+
+## Important Notes
+
+- You should always try to make changes backward compatible, Unless absolutely necessary.
+
+---
+
+## Project Overview
+
+`@hiprax/errors` is a lightweight, zero-dependency error handling toolkit for Express.js applications, published on NPM under the `@hiprax/errors` scope. It provides a custom `ErrorHandler` class, an Express error middleware, common error mappers for popular libraries (Mongoose, JWT, Axios, Zod, etc.), async handler wrappers, and HTTP error factory functions.
+
+- **Repository**: [GitHub](https://github.com/Hiprax/errors)
+- **NPM**: [NPM](https://www.npmjs.com/package/@hiprax/errors)
+- **License**: MIT
+- **Author**: Hiprax
+
+## Architecture
+
+```text
+src/
+  index.ts              # Barrel export (re-exports all modules)
+  ErrorHandler.ts       # Custom Error subclass with statusCode/statusText
+  errorCodes.ts         # Map<number, string> of HTTP status codes (400-511)
+  errorMiddleware.ts     # Express 4-arg error middleware + createErrorMiddleware factory
+  handleCommonErrors.ts  # Maps library-specific errors to ErrorHandler
+  catchAsync.ts          # Async wrapper (function) + class decorator
+  httpErrors.ts          # Namespaced HTTP error factory functions
+
+tests/
+  ErrorHandler.test.ts
+  errorCodes.test.ts
+  errorMiddleware.test.ts
+  errorMiddleware.integration.test.ts  # supertest-based end-to-end through real Express
+  handleCommonErrors.test.ts
+  catchAsync.test.ts
+  httpErrors.test.ts
+  packageExports.test.ts               # asserts the package.json exports map (subpath + main entry)
+```
+
+## Key Modules (Detailed)
+
+### `ErrorHandler` (src/ErrorHandler.ts)
+
+- Extends native `Error`.
+- Properties: `statusCode: number`, `statusText: string | undefined`, `name: 'ErrorHandler'`.
+- Constructor: `(message?: string, statusCode?: number, options?: { cause?: unknown })`.
+  - Default message: `"Something went wrong! Please try again"`.
+  - Default statusCode: `500`.
+  - If the given statusCode is not in the `errorCodes` Map, it normalizes to `500`.
+  - `statusText` is looked up from the `errorCodes` Map.
+  - Sets `this.name = 'ErrorHandler'` for proper identification.
+  - Calls `Error.captureStackTrace` (when available) for cleaner stack traces.
+  - Forwards `options.cause` to `super(message, options)` per the ES2022 `Error` cause spec, so `err.cause` is preserved on the resulting instance.
+- Exported as **default** from its module, re-exported as **named** from index. The `ErrorHandlerOptions` interface is also re-exported from the package entry (`import type { ErrorHandlerOptions } from "@hiprax/errors"`) so consumers wrapping the constructor or building factories don't need to redeclare it.
+
+### `errorCodes` (src/errorCodes.ts)
+
+- A sealed `ReadonlyMap<number, string>` containing all standard HTTP 4xx and 5xx status codes and their text descriptions (e.g., `400 -> "Bad Request"`, `418 -> "I'm a teapot"`, `500 -> "Internal Server Error"`).
+- The exported instance still satisfies `instanceof Map` and supports `.has`, `.get`, and iteration, but `set`, `delete`, and `clear` throw `TypeError` so a misbehaving consumer cannot mutate library internals process-wide.
+- Used internally by `ErrorHandler` to validate status codes and resolve `statusText`.
+- Exported as **default** from its module, re-exported as **named** from index (typed as `ReadonlyMap<number, string>`).
+
+### `errorMiddleware` (src/errorMiddleware.ts)
+
+- Typed as Express's `ErrorRequestHandler` so `errorMiddleware.length === 4` is a guarantee, not an accident.
+- The default export is the zero-config form: `const errorMiddleware = createErrorMiddleware()`. The module also exports the **named** `createErrorMiddleware(options)` factory and the `ErrorMiddlewareOptions` type; `index.ts` re-exports both.
+- Processing pipeline:
+  1. Runs `handleCommonErrors(err)` to normalize by `err.name`.
+  2. Runs a switch on `err.code` for additional mappings:
+     - `"ENOENT"` -> 404 "Resource not found"
+     - `11000` (MongoDB duplicate key) -> 400 with duplicate field names (falls back to "unknown" if `keyValue` is empty)
+     - `"EBADCSRFTOKEN"` -> 403 "Invalid CSRF token"
+     - `"ECONNREFUSED"` / `"ECONNRESET"` / `"ETIMEDOUT"` -> 502 "Upstream network error"
+  3. Checks `res.headersSent`; if true, **delegates to the default Express handler via `return next(err)`** (forwarding the original `err` so the default handler logs the real cause). Falls back to `res.end()` only when `next` is not a function.
+  4. Reads `message`, `statusText`, and `stack` through a `safeReadString` helper that catches throwing getters and circular references; the stack is truncated at 10 KB.
+  5. Builds JSON payload typed as `ErrorPayload`: `{ success: false, message, statusCode, statusText }`.
+  6. In non-production (`NODE_ENV !== "production"`), appends `stack` to the payload.
+  7. Responds with `res.status(statusCode).json(payload)`. If `json()` throws (e.g., monkey-patched response), retries with a sanitized payload, then falls back to a plain-text response so the middleware never bubbles past Express.
+- **`createErrorMiddleware(options)` factory.** `ErrorMiddlewareOptions` currently carries one flag, `exposeServerErrors` (default `true`). With the default `true` the middleware is byte-for-byte identical to the historical behavior — the redaction block is skipped entirely. With `false`, server-error (`statusCode >= 500`) messages are replaced with the generic status text (e.g. "Internal Server Error", "Bad Gateway") **in production only** (`NODE_ENV === "production"`) to avoid leaking internal details (CWE-209). Client errors (4xx) and non-production responses are never redacted, the original error is still reachable via `err.cause`, and `stack` gating is unchanged. The redaction slots in at the single payload-message assignment point; the `handleCommonErrors` normalization, the `err.code` switch, the `headersSent` delegation, the `safeReadString`/`safeStatusText` guards, the stack truncation, and the json→sanitize→text fallback chain are untouched. `errorMiddleware` is `createErrorMiddleware()`, so the inner middleware keeps its 4-arg signature (`length === 4`).
+- Exports the `ErrorPayload` and `ErrorMiddlewareOptions` interfaces for consumers typing their fetch wrappers, error parsers, and middleware factory options; both are also re-exported from the package entry.
+- Must be registered as the **last** middleware in the Express app (`app.use(errorMiddleware)`).
+
+### `handleCommonErrors` (src/handleCommonErrors.ts)
+
+- Pure function: `(err: any) => ErrorHandler`.
+- Guards against null/non-object input (returns generic 500).
+- Switches on `err.name`:
+  - `"CastError"` -> 400, message includes `err.path` (Mongoose cast error).
+  - `"ValidationError"` -> 400, joins all `err.errors[*].message` (Mongoose validation). Safely handles missing `errors` property.
+  - `"JsonWebTokenError"` / `"TokenExpiredError"` / `"NotBeforeError"` -> 401 (jsonwebtoken library; covers all three error subclasses including the `nbf` "not before" case).
+  - `"AxiosError"` -> If `err.response.status` is a numeric value present in `errorCodes`, that status is propagated. The message is `err.message` (falling back to "Error communicating with an external service"), optionally enriched with `err.response.statusText` in parentheses; `err.response.data` is **deliberately not read**, to avoid leaking upstream payloads. Otherwise falls back to 502 "Bad gateway".
+  - `"SyntaxError"` -> 400 "Malformed JSON or invalid syntax".
+  - `"ZodError"` -> 400, joins `err.issues[*].message` (Zod schema validation).
+  - `"AggregateError"` -> 500, joins sub-error messages from `err.errors[]` with `; ` (falls back to "Multiple errors occurred" when empty). Original error is attached as `cause`.
+  - Default: passes through `err.message` and `err.statusCode` if present, otherwise 500.
+
+### `catchAsync` (src/catchAsync.ts)
+
+- **Dual-purpose** exported function with TypeScript overloads:
+  1. **Function wrapper**: `catchAsync(fn)` where `fn` is an Express `RequestHandler` or `ErrorRequestHandler`.
+     - Wraps the handler so that thrown errors (sync) or rejected promises (async) are forwarded to `next()`.
+     - Prevents duplicate `next()` calls via a `hasCalledNext` guard.
+     - Non-Error throws are wrapped in `new Error(...)`.
+     - Preserves function arity (3 params for normal handlers, 4 for error handlers) so Express routing correctly identifies the handler type.
+     - Preserves function `.name` and any custom properties via `Object.defineProperty`.
+  2. **Class decorator**: `@catchAsync` on a controller class.
+     - Walks the prototype chain (up to but not including `Object.prototype`) to discover inherited methods.
+     - **Inheritance isolation**: inherited methods are wrapped via shadowing on the **child** prototype only. Parent prototypes are never mutated, so a `BaseController` shared between decorated and undecorated subclasses keeps its original methods intact.
+     - Wraps every own method (except `constructor`) with the handler wrapper.
+     - Uses a `WeakSet` to avoid processing the same prototype twice (circular protection).
+     - **Compatible with both decorator dialects**: TypeScript legacy/experimental decorators (`experimentalDecorators: true`) call the decorator as `catchAsync(MyClass)`; TypeScript 5.x stage-3 ECMAScript decorators (the default, `experimentalDecorators: false`) call it as `catchAsync(MyClass, context: ClassDecoratorContext)`. The implementation accepts an optional second argument and ignores it, so the same `@catchAsync class Foo {}` source compiles cleanly under either mode.
+- **Idempotence**: a `Symbol.for("@hiprax/errors:catchAsync.wrapped")` marker is stamped on every wrapped function and decorated class constructor. Re-applying `catchAsync` is a no-op — `catchAsync(catchAsync(fn)) === catchAsync(fn)` — so mixins, router helpers, or repeated decoration cannot double-wrap.
+- Detection logic: uses `/^class[\s{]/` against `Function.prototype.toString.call(fn)` to detect class constructors, matching both the normal spaced form (`class Foo {}`, `class {}`) and name-stripped / whitespace-free anonymous forms (`class{...}`) that a minifier emits.
+- Returns null/undefined unchanged if passed null/undefined.
+- Throws `TypeError` for non-function, non-class inputs.
+
+### `httpErrors` (src/httpErrors.ts)
+
+- Exports a single `httpErrors` namespace object containing factory functions.
+- Each factory: `(message?: string, options?: { cause?: unknown }) => ErrorHandler` with a default message. The optional `options.cause` is forwarded to the produced `ErrorHandler` so the original error chain is preserved when wrapping (e.g., `httpErrors.conflict("Email taken", { cause: dbErr })`).
+- Available factories and their status codes:
+
+  | Factory                | Code | Default message          |
+  | ---------------------- | ---- | ------------------------ |
+  | `badRequest`           | 400  | "Bad request"            |
+  | `unauthorized`         | 401  | "Unauthorized"           |
+  | `forbidden`            | 403  | "Forbidden"              |
+  | `notFound`             | 404  | "Not found"              |
+  | `methodNotAllowed`     | 405  | "Method not allowed"     |
+  | `requestTimeout`       | 408  | "Request timeout"        |
+  | `conflict`             | 409  | "Conflict"               |
+  | `gone`                 | 410  | "Gone"                   |
+  | `payloadTooLarge`      | 413  | "Payload too large"      |
+  | `unsupportedMediaType` | 415  | "Unsupported media type" |
+  | `unprocessableEntity`  | 422  | "Unprocessable entity"   |
+  | `tooManyRequests`      | 429  | "Too many requests"      |
+  | `internalServerError`  | 500  | "Internal server error"  |
+  | `notImplemented`       | 501  | "Not implemented"        |
+  | `badGateway`           | 502  | "Bad gateway"            |
+  | `serviceUnavailable`   | 503  | "Service unavailable"    |
+  | `gatewayTimeout`       | 504  | "Gateway timeout"        |
+
+- Uses an internal `createErrorFactory(statusCode, defaultMessage)` helper.
+- Also exports the `ErrorFactory` type: `(message?: string, options?: { cause?: unknown }) => ErrorHandler`. The type is re-exported from the package entry, so consumers can `import type { ErrorFactory } from "@hiprax/errors"`.
+
+## Build & Tooling
+
+| Tool       | Config File      | Purpose                                                                                 |
+| ---------- | ---------------- | --------------------------------------------------------------------------------------- |
+| TypeScript | `tsconfig.json`  | Type checking only (`noEmit: true`), strict mode, ES2022 target, NodeNext modules. Explicit `rootDir: "./src"` (TS 6 no longer infers a common source directory when `include` is `["src"]` and ts-jest separately loads `tests/`). `ignoreDeprecations: "6.0"` (silences a TS5101 raised by tsup's DTS pass for the now-deprecated `baseUrl` option) |
+| tsup       | `tsup.config.ts` | Bundling: ESM (`.mjs`) + CJS (`.js`), `.d.ts` declarations, unminified, sourcemaps, shims |
+| Jest       | `jest.config.js` | Testing with `ts-jest` preset, tests in `tests/` directory                              |
+| ESLint v9  | `eslint.config.mjs` | Flat-config linting with `typescript-eslint` v8. Held at v9 deliberately — v10 requires Node `^20.19.0 \|\| ^22.13.0 \|\| >=24` and would drop the Node 18 leg of the CI matrix. `eslint-config-prettier` is imported from `eslint-config-prettier/flat` (v10's flat-config entry) |
+
+## Commands
+
+| Command                    | What it does                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| `npm run build`            | Bundle with tsup to `dist/`                                                            |
+| `npm test`                 | Run Jest test suite                                                                    |
+| `npm run type-check`       | `tsc --noEmit` against `src/` (per `tsconfig.json` `include: ["src"]`). Tests are type-checked separately by `ts-jest` during `npm test` |
+| `npm run lint`             | ESLint with `--max-warnings=0` over `src` + `tests`                                    |
+| `npm run lint:fix`         | ESLint with autofix                                                                    |
+| `npm run check-types-pack` | Run `attw --pack .` to verify the published bundle's types resolve cleanly in all four resolution modes (node10, node16-CJS, node16-ESM, bundler). Gated in CI. |
+
+## Package Configuration
+
+- **Entry points** (package.json `exports`): nested `types` first under each condition so TypeScript `moduleResolution: NodeNext` picks the matching `.d.ts` shape for the resolved runtime file. This eliminates the "Masquerading as CJS" warning that strict ESM consumers see when types and runtime conditions disagree.
+  - `import` (ESM): `types: ./dist/index.d.mts` → `default: ./dist/index.mjs`
+  - `require` (CJS): `types: ./dist/index.d.ts` → `default: ./dist/index.js`
+  - Top-level `main` / `module` / `types` fields are preserved for legacy resolvers (Node 10 algorithm, older bundlers).
+  - The `exports` map also exposes the `"./package.json": "./package.json"` subpath so `require.resolve("@hiprax/errors/package.json")` (and the ESM equivalent) resolve instead of throwing `ERR_PACKAGE_PATH_NOT_EXPORTED` under strict exports encapsulation. Purely additive — it does not affect the `"."` main-entry type resolution.
+  - Verified by `npm run check-types-pack` (`attw --pack .`); a CI step gates the same check on every push and PR.
+- **Peer dependency**: `express >= 4.x`
+- **Runtime dependencies**: None (zero dependencies)
+- **Engine**: Node >= 18.12
+- **`sideEffects: false`**: Enables tree-shaking by bundlers
+- **Published files**: Only `dist/` directory (configured via `files` in package.json and `.npmignore`)
+
+## Conventions & Patterns
+
+- Default exports are used for single-class/single-value modules (`ErrorHandler`, `errorCodes`, `errorMiddleware`), then re-exported as named exports from `index.ts`.
+- Named exports are used for multi-export modules (`catchAsync`, `handleCommonErrors`, `httpErrors`).
+- `httpErrors` factories are deliberately not exported individually to encourage namespaced usage (`httpErrors.notFound()` instead of bare `notFound()`).
+- The `catchAsync` wrapper uses duck-typing (checking for `.prototype`) to distinguish class constructors from plain functions.
+- Error normalization flows: raw error -> `handleCommonErrors` (by `err.name`) -> `errorMiddleware` switch (by `err.code`) -> JSON response.
+
+## CI / Workflow Conventions
+
+- **Action pinning**: every `uses:` reference in `.github/workflows/*.yml` is pinned to a full 40-character commit SHA, with a trailing `# vX.Y.Z` comment for human readability. Pin updates are done manually now that Dependabot is no longer wired up — when bumping an action, replace both the SHA and the trailing version comment together. Never replace a pinned SHA with a moving tag (`@v6`); pinning prevents tag-retag supply-chain attacks.
+- **Token permissions**: every workflow declares a top-level `permissions:` block scoped to read-only (`contents: read` or `read-all`). Any write permission (`contents: write`, `id-token: write`, `security-events: write`, `packages: write`) lives at the **job** level on the single job that needs it. The release workflow's `publish` job is the only place that holds `contents: write` (for creating the GitHub Release) and `id-token: write` (for npm provenance).
+- **Checkout hygiene**: every `actions/checkout` step passes `persist-credentials: false`. The token is only required during the checkout itself; leaving it persisted in `.git/config` lets later steps push or call the API with the implicit `GITHUB_TOKEN`. The release workflow keeps `fetch-depth: 0` because `git describe` and the changelog-extraction step need full history.
+- **Branch protection** (configured in GitHub Settings → Rules → Rulesets, not in code): the active `main` ruleset requires a pull request before merging, requires all CI status checks to pass (`Test on Node 18.x` … `24.x`, `Analyze (javascript-typescript)`), requires branches to be up to date before merging (`strict_required_status_checks_policy: true`), enforces linear history, and disallows force pushes and deletions on the default branch.
+- **Tag protection** (configured in GitHub Settings → Rules → Rulesets): the active `release-tags` ruleset targets `refs/tags/v*.*.*` and blocks `deletion`, `non_fast_forward`, and `update`. A canonical copy of the ruleset definition lives at `.github/rulesets/tags.json` — re-apply with `gh api repos/Hiprax/errors/rulesets -X POST --input .github/rulesets/tags.json` if it ever needs to be recreated. This matters because `release.yml` triggers on tag push and publishes to npm with provenance; a tag that can be force-pushed or rewritten could re-publish a different commit under the same version.
+- **Repo settings** worth keeping on: `delete_branch_on_merge: true` (auto-clean merged PR branches), `allow_update_branch: true` (lets contributors sync a PR branch with `main` from the GitHub UI), `secret_scanning` + `secret_scanning_push_protection` enabled. Dependabot vulnerability alerts and automated security updates are deliberately **off** (see v0.5.4 CHANGELOG / global CLAUDE.md exclusions).
+
+## Security Reporting
+
+- `SECURITY.md` at repo root is the canonical reporting channel: GitHub private vulnerability advisories (preferred) or email to the maintainer. Don't add a duplicate reporting flow elsewhere — keep all reporting instructions in `SECURITY.md`.
+
+## Testing Patterns
+
+- Tests use Jest mocks for Express `req`, `res`, and `next`.
+- The `errorMiddleware` tests create a custom `createRes()` helper that implements `status()`, `json()`, and `end()` with tracking properties (`code`, `body`, `sent`).
+- `catchAsync` tests are the most extensive, covering: async/sync errors, non-Error throws, duplicate next prevention, property preservation, class decorators with inheritance, bound methods, circular dependencies, custom errors, frozen/sealed objects, Proxy objects, async generators, and async iterators.
+- Pipeline-precedence tests in `tests/errorMiddleware.test.ts` pin that the `err.code` switch wins over `handleCommonErrors` for an error matching both stages — at the message level (`AxiosError` + `ECONNREFUSED` → 502 "Upstream network error") and at the HTTP-status level (`CastError` + `ENOENT` → 404 "Resource not found").
+- `createErrorMiddleware` redaction tests (unit in `tests/errorMiddleware.test.ts`, end-to-end in `tests/errorMiddleware.integration.test.ts`) assert the default exposes 5xx messages, and that `exposeServerErrors: false` redacts 5xx to the generic status text in production while leaving 4xx and non-production responses untouched. Each test restores `process.env.NODE_ENV` (in a `finally` for unit tests, in the suite-level `afterEach` for integration tests).
+- Null/non-object/non-array sub-entry tests in `tests/handleCommonErrors.test.ts` guard the `ValidationError`/`ZodError` branches (including the cross-file assertion that a `ValidationError` with a null sub-entry routed through `errorMiddleware` yields 400, not a downgraded 500).
+- `tests/packageExports.test.ts` reads `package.json` from disk and asserts the `"./package.json"` subpath plus the unchanged `"."` main-entry resolution. It is the one test that asserts the packaging manifest rather than mirroring a single source file.
+- The no-space anonymous-class routing test in `tests/catchAsync.test.ts` builds a name-stripped class via `eval` (the `class{...}` form that terser `-c -m` emits) and asserts it reaches `wrapControllerClass` — prototype methods are wrapped and visible on instances, and errors are forwarded to `next()` — not mis-routed to `wrapHandler`.
+- The `exposeServerErrors: false` ordering pin in `tests/errorMiddleware.test.ts` feeds `{ code: "ECONNREFUSED" }` (no pre-built statusCode) through `createErrorMiddleware({ exposeServerErrors: false })` in production and asserts `res.code 502` / `body.message "Bad Gateway"`, proving redaction reads the **switch-final** status rather than the pre-switch value.
+- Test files otherwise mirror source files 1:1 in the `tests/` directory.
+
+## Important Implementation Details
+
+1. **Status code validation**: Any status code not in the `errorCodes` Map silently normalizes to 500. There is no warning or error thrown.
+2. **Arity preservation**: `catchAsync` creates wrapper functions with explicit 3 or 4 parameters (based on `fn.length`) so Express correctly distinguishes request handlers from error handlers. Locked in by tests.
+3. **headersSent guard**: When `res.headersSent` is true, the middleware delegates to the default Express handler via `return next(err)` (forwarding the original error). It only falls back to `res.end()` when `next` is not a function.
+4. **Stack traces**: Only included in responses when `NODE_ENV !== "production"`. Uses the original error's stack (`err.stack`), read through a `safeReadString` helper and truncated at 10 KB.
+5. **Hostile errors**: `errorMiddleware` reads `message`, `statusText`, and `stack` defensively (catches throwing getters / circular refs / BigInt). `res.status().json()` failures retry with a sanitized payload, then a plain-text fallback, so the middleware never throws past Express.
+6. **Non-Error throws**: Both sync and async non-Error values (strings, numbers, etc.) are wrapped in `new Error()` with a descriptive message before being passed to `next()`.
+7. **`catchAsync` idempotence**: Wrapped functions and decorated class constructors carry a `Symbol.for("@hiprax/errors:catchAsync.wrapped")` marker; re-applying `catchAsync` is a no-op.
+8. **`errorCodes` immutability**: The exported map rejects `set` / `delete` / `clear` with `TypeError`. The TypeScript type is `ReadonlyMap<number, string>`.
+9. **`cause` propagation**: Every `handleCommonErrors` branch (CastError, ValidationError, JsonWebTokenError / TokenExpiredError / NotBeforeError, AxiosError on both upstream-status and 502-fallback paths, SyntaxError, AggregateError, ZodError, default) forwards the original error as `cause` on the returned `ErrorHandler`. Every `errorMiddleware` `err.code` mapping (`ENOENT`, MongoDB `11000`, `EBADCSRFTOKEN`, `ECONNREFUSED` / `ECONNRESET` / `ETIMEDOUT`) does the same. Structured loggers can walk `err.cause` from the normalized `ErrorHandler` back to the raw upstream error. The middleware's JSON response body intentionally omits `cause` to avoid leaking upstream payloads.
