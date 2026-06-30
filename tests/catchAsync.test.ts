@@ -961,7 +961,7 @@ describe("catchAsync", () => {
       expect(handler.length).toBe(3);
     });
 
-    it("preserves arity 4 for a handler with a leading positional then rest (declared length 1)", () => {
+    it("normalizes arity to 3 for an (err, ...rest) handler whose declared length is 1 (not treated as an error handler)", () => {
       // (err, ...rest) reports length === 1, but it is *not* a length>=4 case,
       // so the wrapper falls into the 3-arg branch. This test documents that
       // exact behavior so anyone widening arity detection knows the contract.
