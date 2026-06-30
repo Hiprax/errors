@@ -1,11 +1,12 @@
 import express, {
+  type ErrorRequestHandler,
   type Express,
   type NextFunction,
   type Request,
   type Response,
 } from "express";
 import request from "supertest";
-import { ErrorHandler, errorMiddleware } from "../src";
+import { ErrorHandler, errorMiddleware, createErrorMiddleware } from "../src";
 
 /**
  * Integration tests for `errorMiddleware` exercising the full pipeline:
@@ -22,14 +23,17 @@ import { ErrorHandler, errorMiddleware } from "../src";
  * `errorMiddleware` is registered last so it observes the same pipeline real
  * applications use.
  */
-function buildApp(makeError: () => unknown): Express {
+function buildApp(
+  makeError: () => unknown,
+  middleware: ErrorRequestHandler = errorMiddleware
+): Express {
   const app = express();
 
   app.get("/throw", (_req: Request, _res: Response, next: NextFunction) => {
     next(makeError() as any);
   });
 
-  app.use(errorMiddleware);
+  app.use(middleware);
   return app;
 }
 
@@ -200,5 +204,35 @@ describe("errorMiddleware integration (supertest + real express)", () => {
     expect(response.status).toBe(500);
     expect(typeof response.body.stack).toBe("string");
     expect(response.body.stack.length).toBeGreaterThan(0);
+  });
+
+  describe("createErrorMiddleware({ exposeServerErrors: false }) hardening", () => {
+    it("redacts a 500 message to the generic status text in production (no stack)", async () => {
+      process.env.NODE_ENV = "production";
+      const app = buildApp(
+        () => new ErrorHandler("leak me", 500),
+        createErrorMiddleware({ exposeServerErrors: false })
+      );
+      const response = await request(app).get("/throw");
+      expect(response.status).toBe(500);
+      expect(response.body).toMatchObject({
+        success: false,
+        message: "Internal Server Error",
+        statusCode: 500,
+        statusText: "Internal Server Error",
+      });
+      expect(response.body.stack).toBeUndefined();
+    });
+
+    it("still exposes the real 500 message outside production with the same factory", async () => {
+      process.env.NODE_ENV = "test";
+      const app = buildApp(
+        () => new ErrorHandler("leak me", 500),
+        createErrorMiddleware({ exposeServerErrors: false })
+      );
+      const response = await request(app).get("/throw");
+      expect(response.status).toBe(500);
+      expect(response.body.message).toBe("leak me");
+    });
   });
 });

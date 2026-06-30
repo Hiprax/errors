@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-30
+
+### Added
+
+- `createErrorMiddleware(options)` factory and the `ErrorMiddlewareOptions` type. The opt-in `exposeServerErrors` flag (default `true`) redacts server-error (`statusCode >= 500`) messages to the generic status text **in production only** when set to `false`, so internal details are not leaked to clients (CWE-209). The default preserves the historical, zero-config `errorMiddleware` behavior byte-for-byte; client errors (4xx) and non-production responses are never redacted, and the original error stays reachable via `err.cause` (`src/errorMiddleware.ts`, `src/index.ts`)
+- `"./package.json"` subpath is now resolvable via the `exports` map, so `require.resolve("@hiprax/errors/package.json")` (and the ESM equivalent) no longer throw `ERR_PACKAGE_PATH_NOT_EXPORTED` under strict exports encapsulation. Purely additive — the `"."` main-entry type resolution is unchanged (`package.json`)
+
+### Fixed
+
+- `handleCommonErrors` `ValidationError` and `ZodError` branches no longer throw a `TypeError` on a null/non-object sub-entry (which `errorMiddleware` previously caught and downgraded from 400 to 500). Each element is now guarded like the `AggregateError` branch, and `ZodError` gained an `Array.isArray` container guard so a non-array `issues` value can no longer throw (`src/handleCommonErrors.ts`)
+
+### Tests
+
+- Precedence tests pinning that the `errorMiddleware` `err.code` switch wins over `handleCommonErrors` when an error matches both stages — `AxiosError` + `ECONNREFUSED` → 502 "Upstream network error" (message level) and `CastError` + `ENOENT` → 404 "Resource not found" (status level); `createErrorMiddleware` redaction unit + integration tests; null/non-object/non-array sub-entry validation tests; and a package-exports test reading `package.json` from disk (`tests/errorMiddleware.test.ts`, `tests/errorMiddleware.integration.test.ts`, `tests/handleCommonErrors.test.ts`, `tests/packageExports.test.ts`)
+
+### Docs
+
+- Corrected the `CLAUDE.md` `handleCommonErrors` AxiosError bullet (message source is `err.message` + `err.response.statusText`; `err.response.data` is deliberately not read) and the AggregateError separator (`; `, not `, `) to match the implementation; documented the `createErrorMiddleware` factory, the `exposeServerErrors` option, and the `"./package.json"` export across `README.md` and `CLAUDE.md` (`CLAUDE.md`, `README.md`)
+
 ## [0.5.6] - 2026-05-12
 
 ### Removed

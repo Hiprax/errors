@@ -133,6 +133,23 @@ Express error middleware. Register it as the **last** middleware in your app.
 app.use(errorMiddleware);
 ```
 
+#### `createErrorMiddleware(options)`
+
+`errorMiddleware` is the zero-config form of a factory. Call `createErrorMiddleware(options)` to build a middleware with the same pipeline plus opt-in response hardening. `createErrorMiddleware()` with no options is identical to `errorMiddleware`.
+
+| Option               | Default | Description                                                                                                                                                                                                                                                                                                          |
+|----------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `exposeServerErrors` | `true`  | When `false`, server-error (`statusCode >= 500`) messages are replaced with the generic status text (e.g. `"Internal Server Error"`) **in production only** (`NODE_ENV === "production"`), so internal details are not leaked to clients. Client errors (4xx) and non-production responses are unaffected, and the original error stays reachable to structured loggers via `err.cause`. |
+
+```ts
+import { createErrorMiddleware } from "@hiprax/errors";
+
+// Redact 5xx messages to the generic status text in production
+app.use(createErrorMiddleware({ exposeServerErrors: false }));
+```
+
+> Like the `stack` field, this redaction is production-gated: in development/test the real 5xx message is still shown so you can debug, and 4xx messages are never redacted.
+
 ---
 
 ### `handleCommonErrors`
@@ -308,6 +325,7 @@ The package re-exports the following types from its entry point so consumers can
 | `ErrorHandler`        | `./ErrorHandler`     | The custom `Error` subclass itself (also usable as a value via `import { ErrorHandler }`).               |
 | `ErrorHandlerOptions` | `./ErrorHandler`     | Options bag for the `ErrorHandler` constructor — currently `{ cause?: unknown }`, mirrors ES2022.        |
 | `ErrorPayload`        | `./errorMiddleware`  | The JSON shape produced by `errorMiddleware` (`{ success: false, message, statusCode, statusText, stack? }`). |
+| `ErrorMiddlewareOptions` | `./errorMiddleware` | Options bag for `createErrorMiddleware` — currently `{ exposeServerErrors?: boolean }`.                  |
 | `ErrorFactory`        | `./httpErrors`       | The signature shared by every `httpErrors.*` factory: `(message?, options?) => ErrorHandler`.            |
 
 ```ts

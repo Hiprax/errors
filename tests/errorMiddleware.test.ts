@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { errorMiddleware, ErrorHandler } from "../src";
+import { errorMiddleware, createErrorMiddleware, ErrorHandler } from "../src";
 import type { ErrorPayload } from "../src";
 
 function createRes() {
@@ -416,6 +416,143 @@ describe("errorMiddleware", () => {
       expect(last).toBeDefined();
       expect(last.statusCode).toBe(502);
       expect(last.cause).toBe(original);
+    });
+  });
+
+  describe("normalization pipeline precedence (Phase 3)", () => {
+    // errorMiddleware runs handleCommonErrors(err) (switch on err.name) and
+    // THEN a switch(err?.code) that can override the result. These tests pin
+    // the contract that the err.code switch wins when an error matches both
+    // stages — a refactor that silently swapped which stage wins would
+    // otherwise pass the rest of the suite unnoticed.
+
+    it("err.code switch wins over handleCommonErrors when both match (AxiosError + ECONNREFUSED)", () => {
+      const res = createRes();
+      // Both stages resolve to 502: handleCommonErrors' AxiosError branch (no
+      // response → 502 fallback) and the ECONNREFUSED switch branch. The
+      // message is the discriminator that proves the switch ran last.
+      const err = { name: "AxiosError", code: "ECONNREFUSED" } as any;
+      errorMiddleware(err, req, res, next);
+      expect((res as any).code).toBe(502);
+      // Switch branch message, NOT the handleCommonErrors AxiosError-fallback message.
+      expect((res as any).body.message).toBe("Upstream network error");
+      expect((res as any).body.message).not.toBe(
+        "Error communicating with an external service"
+      );
+    });
+
+    it("err.code switch wins at the status level (CastError name + ENOENT code → 404)", () => {
+      const res = createRes();
+      // handleCommonErrors: CastError → 400 "Resource not found. Invalid id"
+      // err.code switch:    ENOENT    → 404 "Resource not found"  (this must win)
+      const err = { name: "CastError", path: "id", code: "ENOENT" } as any;
+      errorMiddleware(err, req, res, next);
+      expect((res as any).code).toBe(404);
+      expect((res as any).body.message).toBe("Resource not found");
+    });
+  });
+
+  describe("createErrorMiddleware factory (Phase 4)", () => {
+    it("returns a length-4 handler that behaves identically to the default export", () => {
+      const mw = createErrorMiddleware();
+      expect(typeof mw).toBe("function");
+      // Express identifies error middleware by arity; the factory must keep it.
+      expect(mw.length).toBe(4);
+
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const res = createRes();
+        const err = new ErrorHandler("still shown by default", 500);
+        mw(err, req, res, next);
+        expect((res as any).code).toBe(500);
+        // Default exposeServerErrors=true preserves the message even in prod —
+        // the zero-config factory is identical to the default export.
+        expect((res as any).body.message).toBe("still shown by default");
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    it("honours an explicit exposeServerErrors: true the same as the default", () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const mw = createErrorMiddleware({ exposeServerErrors: true });
+        const res = createRes();
+        const err = new ErrorHandler("explicitly exposed", 500);
+        mw(err, req, res, next);
+        expect((res as any).code).toBe(500);
+        expect((res as any).body.message).toBe("explicitly exposed");
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    describe("exposeServerErrors: false", () => {
+      it("redacts a 500 message to the generic status text in production", () => {
+        const originalEnv = process.env.NODE_ENV;
+        process.env.NODE_ENV = "production";
+        try {
+          const mw = createErrorMiddleware({ exposeServerErrors: false });
+          const res = createRes();
+          const err = new ErrorHandler("secret db dsn", 500);
+          mw(err, req, res, next);
+          expect((res as any).code).toBe(500);
+          expect((res as any).body.message).toBe("Internal Server Error");
+          expect((res as any).body.statusCode).toBe(500);
+          expect((res as any).body.statusText).toBe("Internal Server Error");
+        } finally {
+          process.env.NODE_ENV = originalEnv;
+        }
+      });
+
+      it("redacts a 502 message to 'Bad Gateway' in production", () => {
+        const originalEnv = process.env.NODE_ENV;
+        process.env.NODE_ENV = "production";
+        try {
+          const mw = createErrorMiddleware({ exposeServerErrors: false });
+          const res = createRes();
+          const err = new ErrorHandler("upstream boom", 502);
+          mw(err, req, res, next);
+          expect((res as any).code).toBe(502);
+          expect((res as any).body.message).toBe("Bad Gateway");
+        } finally {
+          process.env.NODE_ENV = originalEnv;
+        }
+      });
+
+      it("leaves 4xx messages untouched in production", () => {
+        const originalEnv = process.env.NODE_ENV;
+        process.env.NODE_ENV = "production";
+        try {
+          const mw = createErrorMiddleware({ exposeServerErrors: false });
+          const res = createRes();
+          const err = new ErrorHandler("bad field", 400);
+          mw(err, req, res, next);
+          expect((res as any).code).toBe(400);
+          expect((res as any).body.message).toBe("bad field");
+        } finally {
+          process.env.NODE_ENV = originalEnv;
+        }
+      });
+
+      it("keeps the real 5xx message (and stack) outside production", () => {
+        const originalEnv = process.env.NODE_ENV;
+        process.env.NODE_ENV = "development";
+        try {
+          const mw = createErrorMiddleware({ exposeServerErrors: false });
+          const res = createRes();
+          const err = new ErrorHandler("secret db dsn", 500);
+          mw(err, req, res, next);
+          expect((res as any).code).toBe(500);
+          // Dev keeps the real message and includes the stack.
+          expect((res as any).body.message).toBe("secret db dsn");
+          expect(typeof (res as any).body.stack).toBe("string");
+        } finally {
+          process.env.NODE_ENV = originalEnv;
+        }
+      });
     });
   });
 });
